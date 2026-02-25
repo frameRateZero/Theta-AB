@@ -448,6 +448,9 @@ function showScreen(id) {
     document.getElementById('calib-btns').style.opacity = '0';
     setTimeout(calibrate, 150);
   }
+  if (id === 'home-screen') {
+    updateSettings();
+  }
 }
 function showHistory() { renderHistory(); showScreen('history-screen'); }
 function toast(msg, ms=2200) {
@@ -1003,7 +1006,7 @@ function streamLoop() {
       }
       break;
 
-    case 'mask_t1':
+    case 'mask_t1': {
       drawBg();
       const W1 = canvas.width/devicePixelRatio, H1 = canvas.height/devicePixelRatio;
       drawLineMask(ctx, W1/2, H1/2);
@@ -1012,6 +1015,7 @@ function streamLoop() {
       phaseFrame = 0;
       currentItem = { char: pickLetter(), color: DIST_COLOR, role: 'dist' };
       break;
+    }
 
     case 'lag':
       drawItemFrame();
@@ -1040,7 +1044,7 @@ function streamLoop() {
       }
       break;
 
-    case 'mask_t2':
+    case 'mask_t2': {
       drawBg();
       const W2 = canvas.width/devicePixelRatio, H2 = canvas.height/devicePixelRatio;
       drawLineMask(ctx, W2/2, H2/2);
@@ -1048,6 +1052,7 @@ function streamLoop() {
       phase = 'runout'; phaseFrame = 0;
       currentItem = { char: pickLetter(), color: DIST_COLOR, role: 'dist' };
       break;
+    }
 
     case 'runout':
       drawItemFrame();
