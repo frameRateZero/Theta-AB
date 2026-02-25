@@ -1,0 +1,1492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0a0a0f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.json">
+<title>θ WAVE v2.0 — Attentional Blink Lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:#08080f;--surface:#0f0f1a;--border:#1e1e30;
+    --theta:#00e5ff;--theta-dim:rgba(0,229,255,0.12);--theta-glow:rgba(0,229,255,0.4);
+    --danger:#ff3c5a;--danger-dim:rgba(255,60,90,0.2);
+    --text:#e8e8f0;--muted:#5a5a7a;--success:#39ff8a;--warning:#ffcc00;--amber:#ff9d00;
+    --font-mono:'Space Mono',monospace;--font-display:'Syne',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-family:var(--font-mono);min-height:100dvh;overflow:hidden;}
+  body::before{content:'';position:fixed;inset:0;
+    background-image:linear-gradient(rgba(0,229,255,0.025) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(0,229,255,0.025) 1px,transparent 1px);
+    background-size:40px 40px;pointer-events:none;z-index:0;}
+  body::after{content:'';position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+    width:600px;height:600px;
+    background:radial-gradient(ellipse,rgba(0,229,255,0.04) 0%,transparent 70%);
+    pointer-events:none;z-index:0;}
+
+  .screen{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;z-index:10;transition:opacity 0.35s ease;padding:24px;}
+  .screen.hidden{opacity:0;pointer-events:none;}
+
+  /* HOME */
+  #home-screen{gap:18px;overflow-y:auto;justify-content:flex-start;
+    padding:44px 24px 64px;position:absolute;}
+  .logo-theta{font-family:var(--font-display);font-size:clamp(52px,15vw,96px);font-weight:800;
+    color:var(--theta);text-shadow:0 0 60px var(--theta-glow);line-height:1;letter-spacing:-2px;}
+  .logo-sub{font-family:var(--font-display);font-size:clamp(10px,2.5vw,13px);
+    letter-spacing:4px;text-transform:uppercase;color:var(--muted);}
+  .badge-row{display:flex;gap:7px;flex-wrap:wrap;justify-content:center;}
+  .badge{background:var(--theta-dim);border:1px solid rgba(0,229,255,0.2);border-radius:20px;
+    padding:3px 10px;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--theta);}
+  .info-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;
+    padding:16px 18px;max-width:420px;width:100%;}
+  .info-card h3{font-family:var(--font-display);font-size:10px;letter-spacing:4px;
+    text-transform:uppercase;color:var(--theta);margin-bottom:10px;}
+  .info-card p{font-size:12px;line-height:1.75;color:var(--muted);}
+  .changelog{max-width:420px;width:100%;background:rgba(255,157,0,0.07);
+    border:1px solid rgba(255,157,0,0.2);border-radius:10px;padding:10px 14px;
+    font-size:10px;line-height:1.7;color:var(--muted);}
+  .changelog strong{color:var(--warning);}
+
+  .btn-primary{background:var(--theta);color:var(--bg);border:none;border-radius:8px;
+    padding:13px 28px;font-family:var(--font-display);font-size:13px;font-weight:700;
+    letter-spacing:2px;text-transform:uppercase;cursor:pointer;transition:all 0.2s;
+    touch-action:manipulation;user-select:none;}
+  .btn-primary:hover{transform:translateY(-2px);box-shadow:0 0 48px var(--theta-glow);}
+  .btn-primary:active{transform:translateY(0);}
+  .btn-secondary{background:transparent;color:var(--muted);border:1px solid var(--border);
+    border-radius:8px;padding:11px 22px;font-family:var(--font-display);font-size:11px;
+    font-weight:700;letter-spacing:2px;text-transform:uppercase;cursor:pointer;transition:all 0.2s;
+    touch-action:manipulation;user-select:none;}
+  .btn-secondary:hover{border-color:var(--theta);color:var(--theta);}
+  .btn-row{display:flex;gap:9px;flex-wrap:wrap;justify-content:center;}
+
+  /* CALIBRATION */
+  #calibration-screen{gap:22px;}
+  .screen-title{font-family:var(--font-display);font-size:clamp(20px,5vw,26px);
+    font-weight:800;letter-spacing:-0.5px;}
+  .screen-sub{font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);}
+  .calib-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;width:100%;max-width:360px;}
+  .calib-item{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px;}
+  .calib-label{font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);margin-bottom:6px;}
+  .calib-val{font-family:var(--font-display);font-size:20px;font-weight:700;color:var(--theta);}
+  .calib-bar{height:3px;background:var(--border);border-radius:2px;overflow:hidden;margin-top:6px;}
+  .calib-fill{height:100%;background:var(--theta);border-radius:2px;width:0%;transition:width 0.4s;}
+
+  /* TASK */
+  #task-screen{background:var(--bg);padding:0;}
+  #task-canvas{position:absolute;inset:0;width:100%;height:100%;cursor:none;}
+  .task-hud{position:fixed;top:0;left:0;right:0;display:flex;justify-content:space-between;
+    align-items:flex-start;padding:10px 16px;z-index:20;pointer-events:none;
+    background:linear-gradient(rgba(8,8,15,0.7),transparent);}
+  .hud-item{display:flex;flex-direction:column;gap:2px;}
+  .hud-label{font-size:7px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);}
+  .hud-val{font-family:var(--font-display);font-size:17px;font-weight:700;color:var(--theta);}
+  .hud-conf-bar{width:72px;height:3px;background:var(--border);border-radius:2px;margin-top:3px;}
+  .hud-conf-fill{height:100%;border-radius:2px;
+    background:linear-gradient(90deg,var(--danger),var(--warning),var(--success));width:0%;}
+
+  /* TAP BUTTONS — v2.0 persistent thumb targets */
+  .tap-zone{position:fixed;bottom:0;left:0;right:0;display:none;
+    height:120px;z-index:25;align-items:center;justify-content:center;gap:16px;padding:12px 16px;
+    background:linear-gradient(transparent,rgba(8,8,15,0.85));}
+  .tap-btn{flex:1;max-width:200px;height:88px;border-radius:16px;border:2px solid;
+    font-family:var(--font-display);font-size:22px;font-weight:800;letter-spacing:1px;
+    cursor:pointer;transition:all 0.1s;
+    touch-action:manipulation;-webkit-tap-highlight-color:transparent;user-select:none;
+    display:flex;align-items:center;justify-content:center;flex-direction:column;gap:4px;}
+  .tap-btn .tap-sub{font-size:9px;font-weight:400;letter-spacing:2px;text-transform:uppercase;opacity:0.6;}
+  .tap-t1{background:rgba(0,229,255,0.06);border-color:rgba(0,229,255,0.25);color:var(--theta);}
+  .tap-t1.active{background:rgba(0,229,255,0.18);border-color:var(--theta);
+    box-shadow:0 0 24px rgba(0,229,255,0.3);}
+  .tap-t1.done{background:rgba(0,229,255,0.04);border-color:rgba(0,229,255,0.1);
+    color:rgba(0,229,255,0.3);}
+  .tap-t2{background:rgba(57,255,138,0.06);border-color:rgba(57,255,138,0.25);color:var(--success);}
+  .tap-t2.active{background:rgba(57,255,138,0.18);border-color:var(--success);
+    box-shadow:0 0 24px rgba(57,255,138,0.3);}
+  .tap-t2.locked{background:rgba(30,30,48,0.4);border-color:rgba(30,30,48,0.6);
+    color:rgba(90,90,122,0.4);pointer-events:none;}
+
+  /* RESULTS */
+  #results-screen{gap:18px;overflow-y:auto;padding:44px 24px 64px;justify-content:flex-start;}
+  .result-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;
+    padding:20px 22px;width:100%;max-width:480px;}
+  .result-hz{font-family:var(--font-display);font-size:clamp(42px,12vw,72px);font-weight:800;
+    color:var(--theta);line-height:1;text-shadow:0 0 40px var(--theta-glow);}
+  .result-unit{font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);margin-top:4px;}
+  .result-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px;}
+  .result-item{background:rgba(0,229,255,0.04);border:1px solid var(--border);
+    border-radius:8px;padding:10px 12px;}
+  .result-label{font-size:8px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);margin-bottom:4px;}
+  .result-val{font-family:var(--font-display);font-size:18px;font-weight:700;color:var(--text);}
+  .conf-bar-outer{height:8px;background:var(--border);border-radius:4px;overflow:hidden;margin-top:8px;}
+  .conf-bar-inner{height:100%;border-radius:4px;
+    background:linear-gradient(90deg,var(--danger),var(--warning),var(--success));
+    transition:width 0.6s ease;}
+  .chart-wrap{width:100%;max-width:480px;background:var(--surface);
+    border:1px solid var(--border);border-radius:14px;padding:16px;}
+  .chart-label{font-size:9px;letter-spacing:3px;text-transform:uppercase;
+    color:var(--muted);margin-bottom:10px;}
+  canvas{display:block;}
+  .interp-card{background:rgba(0,229,255,0.04);border:1px solid rgba(0,229,255,0.15);
+    border-radius:12px;padding:16px 18px;max-width:480px;width:100%;
+    font-size:12px;line-height:1.75;color:var(--muted);}
+
+  /* HISTORY */
+  #history-screen{gap:18px;overflow-y:auto;padding:44px 24px 64px;justify-content:flex-start;}
+  .history-entry{background:var(--surface);border:1px solid var(--border);border-radius:10px;
+    padding:14px 16px;display:flex;justify-content:space-between;align-items:flex-start;
+    max-width:480px;width:100%;gap:12px;}
+  .history-hz{font-family:var(--font-display);font-size:22px;font-weight:700;color:var(--theta);}
+  .history-conf{font-size:10px;color:var(--muted);margin-top:4px;line-height:1.5;}
+  .history-meta{font-size:9px;color:var(--muted);text-align:right;white-space:nowrap;}
+
+  /* SETTINGS PANEL */
+  .settings-panel{width:100%;max-width:380px;background:var(--surface);
+    border:1px solid var(--border);border-radius:16px;padding:18px 20px;
+    display:flex;flex-direction:column;gap:10px;}
+  .settings-title{font-family:var(--font-display);font-size:11px;font-weight:700;
+    letter-spacing:3px;text-transform:uppercase;color:var(--muted);margin-bottom:2px;}
+  .setting-row{display:flex;flex-direction:column;gap:6px;}
+  .setting-label{display:flex;justify-content:space-between;align-items:center;}
+  .setting-name{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted);}
+  .setting-val{font-family:var(--font-display);font-size:13px;font-weight:700;color:var(--theta);}
+  .setting-slider{-webkit-appearance:none;appearance:none;width:100%;height:3px;
+    border-radius:2px;background:var(--border);outline:none;cursor:pointer;}
+  .setting-slider::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;
+    border-radius:50%;background:var(--theta);cursor:pointer;border:2px solid var(--bg);}
+  .setting-slider::-moz-range-thumb{width:18px;height:18px;border-radius:50%;
+    background:var(--theta);cursor:pointer;border:2px solid var(--bg);}
+  .setting-toggle{display:flex;gap:0;border-radius:8px;overflow:hidden;border:1px solid var(--border);}
+  .setting-toggle button{flex:1;padding:7px 4px;font-family:var(--font-mono);font-size:10px;
+    letter-spacing:1px;text-transform:uppercase;background:transparent;
+    border:none;color:var(--muted);cursor:pointer;transition:all 0.15s;}
+  .setting-toggle button.active{background:var(--theta-dim);color:var(--theta);}
+  .settings-divider{height:1px;background:var(--border);margin:2px 0;}
+
+  /* TOAST */
+  #toast{position:fixed;bottom:32px;left:50%;transform:translateX(-50%);
+    background:var(--surface);border:1px solid var(--border);border-radius:8px;
+    padding:10px 20px;font-size:12px;color:var(--text);z-index:100;
+    transition:opacity 0.3s;pointer-events:none;}
+  #toast.hidden{opacity:0;}
+
+  /* INSTRUCTIONS OVERLAY */
+  .overlay{position:fixed;inset:0;background:rgba(8,8,15,0.94);z-index:50;
+    display:flex;align-items:center;justify-content:center;padding:24px;}
+  .overlay-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;
+    padding:28px;max-width:400px;width:100%;max-height:80dvh;overflow-y:auto;}
+  .overlay-card h2{font-family:var(--font-display);font-size:18px;font-weight:800;
+    color:var(--theta);margin-bottom:16px;}
+  .overlay-card p{font-size:12px;line-height:1.8;color:var(--muted);margin-bottom:12px;}
+  .overlay-card strong{color:var(--text);}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════ HOME SCREEN -->
+<div id="home-screen" class="screen">
+  <div>
+    <div class="logo-theta">θ</div>
+    <div class="logo-sub">Neural Theta Frequency Estimator · v2.0</div>
+  </div>
+  <div class="badge-row">
+    <span class="badge">Twitch Paradigm</span>
+    <span class="badge">RT-Weighted QUEST</span>
+    <span class="badge">Adaptive Contrast</span>
+    <span class="badge">Line Mask</span>
+    <span class="badge">EIG Sampling</span>
+    <span class="badge">CSV Export</span>
+  </div>
+  <div class="info-card">
+    <h3>What this measures</h3>
+    <p>A digit flashes among letters — tap <strong style="color:var(--theta)">T1</strong> when you see it. Shortly after, another digit appears — tap <strong style="color:var(--success)">T2</strong> when you see it. Your reaction times and the pattern of misses reveal the theta-frequency attentional blink cycle. No prompts, no catch trials — just stream, tap, repeat.</p>
+  </div>
+  <div class="changelog">
+    <strong>v2.0 changelog:</strong> Twitch paradigm — tap T1 then T2 &middot; T1 RT weights QUEST updates &middot; Adaptive contrast per SOA bin &middot; Line fragment mask after digits &middot; No catch trials / ITI / response prompts
+  </div>
+
+  <div class="settings-panel">
+    <div class="settings-title">&#9881; Session Settings</div>
+
+    <div class="setting-row">
+      <div class="setting-label">
+        <span class="setting-name">Stream Speed</span>
+        <span class="setting-val" id="lbl-speed">—</span>
+      </div>
+      <input type="range" class="setting-slider" id="sl-speed" min="6" max="16" step="1" value="8" oninput="updateSettings()">
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-label">
+        <span class="setting-name">T1 Font Size</span>
+        <span class="setting-val" id="lbl-t1font">—</span>
+      </div>
+      <input type="range" class="setting-slider" id="sl-t1font" min="48" max="108" step="8" value="96" oninput="updateSettings()">
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-label">
+        <span class="setting-name">T2 Contrast (start)</span>
+        <span class="setting-val" id="lbl-t2contrast">—</span>
+      </div>
+      <input type="range" class="setting-slider" id="sl-t2contrast" min="2" max="60" step="2" value="20" oninput="updateSettings()">
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-label">
+        <span class="setting-name">Contrast Range</span>
+        <span class="setting-val" id="lbl-contrast-range">—</span>
+      </div>
+      <input type="range" class="setting-slider" id="sl-contrast-range" min="10" max="50" step="5" value="30" oninput="updateSettings()">
+    </div>
+
+    <div class="settings-divider"></div>
+
+    <div class="setting-row">
+      <div class="setting-label">
+        <span class="setting-name">SOA Max</span>
+        <span class="setting-val" id="lbl-soamax">—</span>
+      </div>
+      <input type="range" class="setting-slider" id="sl-soamax" min="200" max="600" step="50" value="600" oninput="updateSettings()">
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-label">
+        <span class="setting-name">Trials</span>
+        <span class="setting-val" id="lbl-trials">—</span>
+      </div>
+      <input type="range" class="setting-slider" id="sl-trials" min="20" max="200" step="10" value="120" oninput="updateSettings()">
+    </div>
+
+    <div class="setting-row">
+      <div class="setting-label">
+        <span class="setting-name">T1 Response Window</span>
+        <span class="setting-val" id="lbl-t1win">—</span>
+      </div>
+      <input type="range" class="setting-slider" id="sl-t1win" min="200" max="700" step="50" value="500" oninput="updateSettings()">
+    </div>
+
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:10px;align-items:center;width:100%;max-width:240px;">
+    <button class="btn-primary" onclick="showScreen('calibration-screen')">Begin Session</button>
+    <button class="btn-secondary" onclick="showHistory()">Past Results</button>
+    <button class="btn-secondary" onclick="document.getElementById('instructions-overlay').classList.remove('hidden')">Instructions</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════ INSTRUCTIONS OVERLAY -->
+<div id="instructions-overlay" class="overlay hidden">
+  <div class="overlay-card">
+    <h2>How to play</h2>
+    <p>A stream of letters flows across the screen. <strong>Digits</strong> occasionally appear among them.</p>
+    <p>When you see the <strong style="color:var(--theta)">first digit (T1)</strong> — tap the <strong style="color:var(--theta)">T1 button</strong> (left) as fast as you can.</p>
+    <p>Shortly after, a <strong style="color:var(--success)">second digit (T2)</strong> may appear — tap the <strong style="color:var(--success)">T2 button</strong> (right) if you see it. If you don't see it, don't tap — silence means miss.</p>
+    <p>Both digits are <strong>white</strong> against gray letters. T2 may be faint — it adapts to your detection level. T1 and T2 are from different number ranges to help tell them apart.</p>
+    <p>Your <strong>reaction time</strong> to T1 tells the system how strongly it captured your attention — faster T1 RT means a deeper blink is expected.</p>
+    <p>Keep your thumbs resting on the buttons throughout. Eyes on the centre.</p>
+    <button class="btn-primary" style="width:100%;margin-top:8px;" onclick="document.getElementById('instructions-overlay').classList.add('hidden');showScreen('calibration-screen')">Got it — continue</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════ CALIBRATION SCREEN -->
+<div id="calibration-screen" class="screen hidden">
+  <div class="screen-title">Display Check</div>
+  <div class="screen-sub">Measuring refresh rate</div>
+  <div class="calib-grid">
+    <div class="calib-item">
+      <div class="calib-label">Refresh Rate</div>
+      <div class="calib-val" id="calib-hz">…</div>
+      <div class="calib-bar"><div class="calib-fill" id="calib-hz-bar"></div></div>
+    </div>
+    <div class="calib-item">
+      <div class="calib-label">Timing Jitter</div>
+      <div class="calib-val" id="calib-jitter">…</div>
+      <div class="calib-bar"><div class="calib-fill" id="calib-jitter-bar"></div></div>
+    </div>
+    <div class="calib-item">
+      <div class="calib-label">Frame Duration</div>
+      <div class="calib-val" id="calib-isi">…</div>
+    </div>
+    <div class="calib-item">
+      <div class="calib-label">Status</div>
+      <div class="calib-val" id="calib-status" style="font-size:14px;">…</div>
+    </div>
+  </div>
+  <div id="calib-btns" style="opacity:0;transition:opacity 0.5s;" class="btn-row">
+    <button class="btn-primary" onclick="startSession()">Start Task</button>
+    <button class="btn-secondary" onclick="showScreen('home-screen')">Back</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════ TASK SCREEN -->
+<div id="task-screen" class="screen hidden">
+  <canvas id="task-canvas"></canvas>
+  <div class="task-hud">
+    <div class="hud-item">
+      <div class="hud-label">Trial</div>
+      <div class="hud-val" id="hud-trial">0</div>
+    </div>
+    <div class="hud-item" style="align-items:center;">
+      <div class="hud-label">Confidence</div>
+      <div class="hud-conf-bar"><div class="hud-conf-fill" id="hud-conf"></div></div>
+    </div>
+    <div class="hud-item" style="align-items:center;">
+      <div class="hud-label">T1 RT</div>
+      <div class="hud-val" id="hud-t1rt">—</div>
+    </div>
+    <div class="hud-item" style="align-items:flex-end;">
+      <div class="hud-label">Contrast</div>
+      <div class="hud-val" id="hud-contrast">—</div>
+    </div>
+  </div>
+  <!-- Persistent tap buttons -->
+  <div class="tap-zone" id="tap-zone">
+    <button class="tap-btn tap-t1 locked" id="btn-t1" onpointerdown="tapT1()">
+      T1
+      <span class="tap-sub">Digit</span>
+    </button>
+    <button class="tap-btn tap-t2 locked" id="btn-t2" onpointerdown="tapT2()">
+      T2
+      <span class="tap-sub">Digit</span>
+    </button>
+  </div>
+  <button class="btn-secondary" style="position:fixed;top:12px;right:12px;z-index:30;
+    padding:6px 12px;font-size:9px;opacity:0.4;" onclick="abortSession()">✕</button>
+</div>
+
+<!-- ═══════════════════════════════════════════ RESULTS SCREEN -->
+<div id="results-screen" class="screen hidden">
+  <div class="result-card" style="max-width:480px;width:100%;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+      <div>
+        <div class="result-hz" id="res-hz">—</div>
+        <div class="result-unit" id="res-unit">Hz</div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:9px;letter-spacing:3px;text-transform:uppercase;color:var(--muted);">Confidence</div>
+        <div id="conf-label" style="font-family:var(--font-display);font-size:13px;font-weight:700;">—</div>
+        <div class="conf-bar-outer" style="margin-top:6px;">
+          <div class="conf-bar-inner" id="conf-bar" style="width:0%"></div>
+        </div>
+      </div>
+    </div>
+    <div class="result-grid">
+      <div class="result-item">
+        <div class="result-label">Trough</div>
+        <div class="result-val" id="res-period">—</div>
+      </div>
+      <div class="result-item">
+        <div class="result-label">Blink Depth</div>
+        <div class="result-val" id="res-depth">—</div>
+      </div>
+      <div class="result-item">
+        <div class="result-label">Baseline</div>
+        <div class="result-val" id="res-baseline">—</div>
+      </div>
+      <div class="result-item">
+        <div class="result-label">Amplitude</div>
+        <div class="result-val" id="res-tau">—</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="chart-wrap">
+    <div class="chart-label">Detection Rate &amp; Model Fit — SOA</div>
+    <canvas id="soa-chart"></canvas>
+  </div>
+  <div class="chart-wrap">
+    <div class="chart-label">Adaptive T2 Contrast — by SOA Bin</div>
+    <canvas id="contrast-chart"></canvas>
+  </div>
+  <div class="chart-wrap">
+    <div class="chart-label">Posterior Probability — Theta Frequency</div>
+    <canvas id="freq-chart"></canvas>
+  </div>
+
+  <div class="interp-card" id="blink-interp">—</div>
+
+  <div class="btn-row">
+    <button class="btn-primary" onclick="downloadCSV()">Export CSV</button>
+    <button class="btn-secondary" onclick="startSession()">Run Again</button>
+    <button class="btn-secondary" onclick="showScreen('home-screen')">Home</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════ HISTORY SCREEN -->
+<div id="history-screen" class="screen hidden">
+  <div class="screen-title">Past Sessions</div>
+  <div id="history-list" style="width:100%;max-width:480px;display:flex;flex-direction:column;gap:10px;"></div>
+  <div class="btn-row">
+    <button class="btn-secondary" onclick="clearHistory()">Clear</button>
+    <button class="btn-secondary" onclick="showScreen('home-screen')">Back</button>
+  </div>
+</div>
+
+<div id="toast" class="hidden">—</div>
+
+<script>
+// ════════════════════════════════════════════════════════════════════
+//  θ WAVE v2.0 — Twitch Paradigm
+//  T1 tap → RT captured → weights QUEST
+//  T2 tap → detection at adaptive contrast per SOA bin
+//  Line fragment mask after each digit slot
+//  No catch trials, no ITI, no response prompts
+// ════════════════════════════════════════════════════════════════════
+
+// ── Screens ───────────────────────────────────────────────────────────
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s =>
+    s.classList.toggle('hidden', s.id !== id));
+  if (id === 'calibration-screen') {
+    document.getElementById('calib-btns').style.opacity = '0';
+    setTimeout(calibrate, 150);
+  }
+}
+function showHistory() { renderHistory(); showScreen('history-screen'); }
+function toast(msg, ms=2200) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.remove('hidden');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => el.classList.add('hidden'), ms);
+}
+
+// ── Calibration ───────────────────────────────────────────────────────
+let measuredFPS = 120;
+function calibrate() {
+  const timings = []; let last=null, frames=0;
+  function measure(ts) {
+    if (last !== null) timings.push(ts - last);
+    last = ts; frames++;
+    if (frames < 120) { requestAnimationFrame(measure); return; }
+    const avg = timings.reduce((a,b)=>a+b,0) / timings.length;
+    const vr  = timings.map(t=>(t-avg)**2).reduce((a,b)=>a+b,0) / timings.length;
+    const std = Math.sqrt(vr);
+    const jPct = (std/avg)*100;
+    measuredFPS = Math.round(1000/avg);
+    document.getElementById('calib-hz').textContent      = measuredFPS + ' Hz';
+    document.getElementById('calib-hz-bar').style.width  = Math.min(100,(measuredFPS/144)*100)+'%';
+    document.getElementById('calib-jitter').textContent  = jPct.toFixed(1)+'% σ';
+    document.getElementById('calib-jitter-bar').style.width = Math.max(0,100-jPct*10)+'%';
+    document.getElementById('calib-isi').textContent     = `1 frame (~${(1000/measuredFPS).toFixed(1)} ms)`;
+    const ok = measuredFPS >= 59;
+    document.getElementById('calib-status').textContent  = ok ? '✓ Ready' : '⚠ Low refresh';
+    document.getElementById('calib-status').style.color  = ok ? 'var(--success)' : 'var(--warning)';
+    document.getElementById('calib-btns').style.opacity  = '1';
+  }
+  requestAnimationFrame(measure);
+}
+// Calibrate every time calibration screen is shown (not just once)
+// Handled by showScreen() hook below
+
+// ════════════════════════════════════════════════════════════════════
+//  QUEST+ — Phase-reset Damped Sine Likelihood Model (unchanged from v1.x)
+// ════════════════════════════════════════════════════════════════════
+const QUEST = (() => {
+  const TAU = 250;
+  const nF = 20;
+  const fGrid = Array.from({length:nF}, (_,i) => 3.0 + i * 4.0 / (nF - 1));
+  const ampGrid = [0.30, 0.39, 0.48, 0.57, 0.66, 0.75];
+  const baseGrid = [0.88, 0.93, 0.97];
+  const nA = ampGrid.length, nB = baseGrid.length;
+  const N  = nF * nA * nB;
+  let logPost = new Float64Array(N).fill(-Math.log(N));
+  function idx(fi, ai, bi) { return fi*(nA*nB) + ai*nB + bi; }
+  function pDet(soa_ms, fi, ai, bi) {
+    if (soa_ms <= 0) return baseGrid[bi];
+    const f=fGrid[fi], A=ampGrid[ai], base=baseGrid[bi];
+    const sine = Math.sin(2 * Math.PI * f * soa_ms / 1000);
+    const env  = Math.exp(-soa_ms / TAU);
+    return Math.max(0.02, Math.min(0.98, base - A * sine * env));
+  }
+  function lae(a, b) {
+    if (a === -Infinity) return b; if (b === -Infinity) return a;
+    return a > b ? a + Math.log(1 + Math.exp(b-a)) : b + Math.log(1 + Math.exp(a-b));
+  }
+  function update(detected, soa_ms, weight=1.0) {
+    const lp = new Float64Array(N);
+    for (let fi=0;fi<nF;fi++) for (let ai=0;ai<nA;ai++) for (let bi=0;bi<nB;bi++) {
+      const p  = pDet(soa_ms, fi, ai, bi);
+      const ll = detected ? Math.log(p) : Math.log(1-p);
+      lp[idx(fi,ai,bi)] = logPost[idx(fi,ai,bi)] + weight * ll;
+    }
+    let mx = -Infinity; lp.forEach(v => { if(v>mx) mx=v; });
+    let s  = 0;         lp.forEach(v => s += Math.exp(v-mx));
+    const lz = mx + Math.log(s);
+    for (let i=0;i<N;i++) logPost[i] = lp[i] - lz;
+  }
+  function freqPost() {
+    const post = new Float64Array(nF);
+    for (let fi=0;fi<nF;fi++) {
+      let s = -Infinity;
+      for (let ai=0;ai<nA;ai++) for (let bi=0;bi<nB;bi++)
+        s = lae(s, logPost[idx(fi,ai,bi)]);
+      post[fi] = Math.exp(s);
+    }
+    const tot = post.reduce((a,b)=>a+b,0);
+    return post.map(v=>v/tot);
+  }
+  function meanFreq() { const p=freqPost(); return p.reduce((m,v,i)=>m+v*fGrid[i],0); }
+  function mapFreq()  { const p=freqPost(); let b=0,bv=0; p.forEach((v,i)=>{if(v>bv){bv=v;b=i;}}); return fGrid[b]; }
+  function meanAmp()  {
+    const post=new Float64Array(nA);
+    for(let ai=0;ai<nA;ai++){let s=-Infinity;for(let fi=0;fi<nF;fi++)for(let bi=0;bi<nB;bi++)s=lae(s,logPost[idx(fi,ai,bi)]);post[ai]=Math.exp(s);}
+    const tot=post.reduce((a,b)=>a+b,0); return post.map(v=>v/tot).reduce((m,v,i)=>m+v*ampGrid[i],0);
+  }
+  function meanBase() {
+    const post=new Float64Array(nB);
+    for(let bi=0;bi<nB;bi++){let s=-Infinity;for(let fi=0;fi<nF;fi++)for(let ai=0;ai<nA;ai++)s=lae(s,logPost[idx(fi,ai,bi)]);post[bi]=Math.exp(s);}
+    const tot=post.reduce((a,b)=>a+b,0); return post.map(v=>v/tot).reduce((m,v,i)=>m+v*baseGrid[i],0);
+  }
+  function confidence() {
+    const p=freqPost(), maxH=Math.log(nF); let H=0;
+    p.forEach(v=>{if(v>1e-12)H-=v*Math.log(v);}); return Math.max(0,Math.min(1,1-H/maxH));
+  }
+  function predictP(soa_ms) {
+    let p=0;
+    for(let fi=0;fi<nF;fi++)for(let ai=0;ai<nA;ai++)for(let bi=0;bi<nB;bi++)
+      p+=Math.exp(logPost[idx(fi,ai,bi)])*pDet(soa_ms,fi,ai,bi);
+    return p;
+  }
+  function freqEntropy() { const fp=freqPost();let h=0;fp.forEach(p=>{if(p>1e-12)h-=p*Math.log(p);});return h; }
+  function freqPostGiven(soa_ms, resp) {
+    const fp=new Float64Array(nF);
+    for(let fi=0;fi<nF;fi++){let w=0;for(let ai=0;ai<nA;ai++)for(let bi=0;bi<nB;bi++){const prior=Math.exp(logPost[idx(fi,ai,bi)]);const pd=pDet(soa_ms,fi,ai,bi);w+=prior*(resp?pd:1-pd);}fp[fi]=w;}
+    const tot=fp.reduce((a,b)=>a+b,0);if(tot>0)for(let i=0;i<nF;i++)fp[i]/=tot;return fp;
+  }
+  function entropy(dist){let h=0;dist.forEach(p=>{if(p>1e-12)h-=p*Math.log(p);});return h;}
+  function nextSOA(candidates) {
+    const hC=freqEntropy();let best=candidates[0],bestEIG=-Infinity;
+    candidates.forEach(s=>{
+      const pY=predictP(s),pN=1-pY;
+      const eig=hC-(pY*entropy(freqPostGiven(s,1))+pN*entropy(freqPostGiven(s,0)));
+      if(eig>bestEIG){bestEIG=eig;best=s;}
+    });
+    return best;
+  }
+  function reset() { logPost = new Float64Array(N).fill(-Math.log(N)); }
+  function meanTroughMs() { return 500 / meanFreq(); }
+  function mapTroughMs()  { return 500 / mapFreq();  }
+  return { update, predictP, nextSOA, reset, freqPost, fGrid, nF,
+           meanFreq, mapFreq, meanAmp, meanBase, meanTroughMs, mapTroughMs, confidence, TAU };
+})();
+
+// ════════════════════════════════════════════════════════════════════
+//  PER-SOA-BIN CONTRAST STAIRCASE
+//  SOA range 50-600ms split into 6 bins.
+//  Each bin runs an independent 1-up-2-down staircase targeting 70.7%.
+//  Step size: 0.5 contrast stops, halving after first reversal.
+// ════════════════════════════════════════════════════════════════════
+const CONTRAST_BINS = [
+  {lo:50,  hi:120, label:'50–120ms'},
+  {lo:120, hi:200, label:'120–200ms'},
+  {lo:200, hi:280, label:'200–280ms'},
+  {lo:280, hi:380, label:'280–380ms'},
+  {lo:380, hi:500, label:'380–500ms'},
+  {lo:500, hi:650, label:'500–650ms'},
+];
+
+function makeBinStaircase(startContrast) {
+  return {
+    contrast:    startContrast, // current contrast pct 0-100
+    step:        8,             // contrast % step (halves after first reversal)
+    lastDir:     0,             // +1 up, -1 down
+    reversals:   0,
+    streak:      0,             // consecutive hits (need 2 for step down)
+    history:     [],            // {contrast, detected}
+  };
+}
+
+const BIN_STAIRCASES = {};
+
+function getBin(soa_ms) {
+  return CONTRAST_BINS.findIndex(b => soa_ms >= b.lo && soa_ms < b.hi);
+}
+
+function getBinContrast(soa_ms) {
+  const bi = getBin(soa_ms);
+  if (bi < 0) return CFG.t2ContrastStart;
+  if (!BIN_STAIRCASES[bi]) BIN_STAIRCASES[bi] = makeBinStaircase(CFG.t2ContrastStart);
+  return BIN_STAIRCASES[bi].contrast;
+}
+
+function updateBinStaircase(soa_ms, detected) {
+  const bi = getBin(soa_ms);
+  if (bi < 0) return;
+  if (!BIN_STAIRCASES[bi]) BIN_STAIRCASES[bi] = makeBinStaircase(CFG.t2ContrastStart);
+  const s = BIN_STAIRCASES[bi];
+  const minC = CFG.t2ContrastMin, maxC = CFG.t2ContrastStart + CFG.t2ContrastRange;
+  s.history.push({contrast: s.contrast, detected});
+
+  if (detected) {
+    s.streak++;
+    if (s.streak >= 2) {
+      // 2 consecutive hits → step down (harder)
+      const dir = -1;
+      if (s.lastDir === 1) { s.reversals++; if(s.reversals===1) s.step = Math.max(2, s.step/2); }
+      s.lastDir = dir; s.streak = 0;
+      s.contrast = Math.max(minC, s.contrast - s.step);
+    }
+  } else {
+    // 1 miss → step up (easier)
+    s.streak = 0;
+    const dir = 1;
+    if (s.lastDir === -1) { s.reversals++; if(s.reversals===1) s.step = Math.max(2, s.step/2); }
+    s.lastDir = dir;
+    s.contrast = Math.min(maxC, s.contrast + s.step);
+  }
+}
+
+function contrastToHex(pct) {
+  // pct: 0=invisible (#808080), 100=max dark (#000000 but clamped)
+  const lum = Math.round(128 - (pct/100) * 128);
+  const h = Math.max(0, Math.min(255, lum)).toString(16).padStart(2,'0');
+  return '#' + h + h + h;
+}
+
+function resetBinStaircases() {
+  for (const k in BIN_STAIRCASES) delete BIN_STAIRCASES[k];
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  SETTINGS
+// ════════════════════════════════════════════════════════════════════
+let CFG = {
+  framesPerItem:    8,     // stream speed (~67ms @ 120Hz)
+  t1FontPx:         96,
+  t2ContrastStart:  20,    // starting contrast % for each bin
+  t2ContrastRange:  30,    // max contrast range above start
+  t2ContrastMin:    2,     // floor
+  soaMaxMs:         600,
+  totalTrials:      120,
+  t1WinMs:          500,   // T1 response window (ms)
+};
+
+let FRAMES_PER_ITEM = CFG.framesPerItem;
+let STIM_FRAMES     = CFG.framesPerItem;
+let TOTAL_TRIALS    = CFG.totalTrials;
+let T1_FONT_FACE    = `bold ${CFG.t1FontPx}px Arial, Helvetica, sans-serif`;
+
+function grayToHex(g) {
+  const h = Math.max(0,Math.min(255,Math.round(g))).toString(16).padStart(2,'0');
+  return '#' + h + h + h;
+}
+
+function updateSettings() {
+  CFG.framesPerItem = parseInt(document.getElementById('sl-speed').value);
+  const ms = Math.round(CFG.framesPerItem * (1000/120));
+  document.getElementById('lbl-speed').textContent = ms + 'ms/item';
+
+  CFG.t1FontPx = parseInt(document.getElementById('sl-t1font').value);
+  document.getElementById('lbl-t1font').textContent = CFG.t1FontPx + 'px';
+
+  CFG.t2ContrastStart = parseInt(document.getElementById('sl-t2contrast').value);
+  document.getElementById('lbl-t2contrast').textContent = CFG.t2ContrastStart + '%';
+
+  CFG.t2ContrastRange = parseInt(document.getElementById('sl-contrast-range').value);
+  document.getElementById('lbl-contrast-range').textContent = '±' + CFG.t2ContrastRange + '%';
+
+  CFG.soaMaxMs = parseInt(document.getElementById('sl-soamax').value);
+  document.getElementById('lbl-soamax').textContent = CFG.soaMaxMs + 'ms';
+
+  CFG.totalTrials = parseInt(document.getElementById('sl-trials').value);
+  document.getElementById('lbl-trials').textContent = CFG.totalTrials;
+
+  CFG.t1WinMs = parseInt(document.getElementById('sl-t1win').value);
+  document.getElementById('lbl-t1win').textContent = CFG.t1WinMs + 'ms';
+}
+
+function applySettings() {
+  FRAMES_PER_ITEM = CFG.framesPerItem;
+  STIM_FRAMES     = CFG.framesPerItem;
+  TOTAL_TRIALS    = CFG.totalTrials;
+  T1_FONT_FACE    = `bold ${CFG.t1FontPx}px Arial, Helvetica, sans-serif`;
+}
+
+function initSettings() { updateSettings(); }
+
+// ════════════════════════════════════════════════════════════════════
+//  STREAM CONSTANTS
+// ════════════════════════════════════════════════════════════════════
+const BG_COLOR     = 'rgb(128,128,128)';
+const DIST_COLOR   = '#222222';
+const T1_COLOR     = '#d8d8d8';  // white-ish, clearly distinct
+const FIX_COLOR    = '#1a1a1a';
+const DIST_FONT    = 'bold 108px Arial, Helvetica, sans-serif';
+
+// T1 digits: 1-4, T2 digits: 6-9 (distinct ranges, same Low/High task)
+const T1_POOL = ['1','2','3','4'];
+const T2_POOL = ['6','7','8','9'];
+const LETTER_POOL = ['K','V','Y','Z','N','W','M','H','I','T','F','E','L','J','P','R','U','C'];
+
+const RUNOUT_ITEMS  = 6;  // items after T2 (extends backward mask)
+const PRE_T1_MIN    = 5;  // min distractor items before T1
+const PRE_T1_MAX    = 9;  // max distractor items before T1
+
+// ════════════════════════════════════════════════════════════════════
+//  LINE FRAGMENT MASK
+//  Fired for one frame immediately after T1 and T2 item slots.
+// ════════════════════════════════════════════════════════════════════
+function drawLineMask(ctx, cx, cy, radius=55) {
+  ctx.save();
+  ctx.strokeStyle = '#555';
+  ctx.lineWidth = 3;
+  for (let i = 0; i < 7; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const len   = 20 + Math.random() * 35;
+    const ox    = (Math.random() - 0.5) * radius * 1.6;
+    const oy    = (Math.random() - 0.5) * radius * 1.6;
+    ctx.beginPath();
+    ctx.moveTo(cx + ox, cy + oy);
+    ctx.lineTo(cx + ox + Math.cos(angle)*len, cy + oy + Math.sin(angle)*len);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  SESSION STATE
+// ════════════════════════════════════════════════════════════════════
+let canvas, ctx, animFrame;
+let sessionActive   = false;
+let trials          = [];
+let currentTrial    = 0;
+let probeHits       = {}, probeMisses = {}, probeContrasts = {};
+let t1RTs           = [];  // all valid T1 RTs for sigmoid calibration
+let medianT1RT      = 300; // running median T1 RT (ms), updated each trial
+
+const DEBUG_MODE = location.search.includes('debug');
+let soaCandidates = [];
+let msPerFrame    = 1000 / 120;
+
+// Per-trial state
+let phase         = 'idle';
+let phaseFrame    = 0;
+let currentItem   = null;
+let maskFrame     = false;  // true for the one-frame mask after a digit
+let t1Onset       = 0;      // performance.now() when T1 appeared
+let t2Onset       = 0;      // performance.now() when T2 appeared
+let t1Tapped      = false;
+let t2Tapped      = false;
+let t1RT          = null;   // ms
+let t2RT          = null;   // ms
+let t1WinOpen     = false;
+let t2WinOpen     = false;
+let t1WinTimeout  = null;
+let t2WinTimeout  = null;
+let currentSOA_ms = 0;
+let currentT2Color= '#808080';
+let lagItems      = 0;
+let lagItemsDone  = 0;
+let runoutDone    = 0;
+let preItemsDone  = 0;
+let preItemsTarget= 0;
+
+function buildSOACandidates(mspf) {
+  const minFrames = Math.ceil(50 / mspf);
+  const maxFrames = Math.ceil(CFG.soaMaxMs / mspf);
+  const cands = [];
+  for (let f = minFrames; f <= maxFrames; f++) cands.push(Math.round(f * mspf));
+  return [...new Set(cands)];
+}
+
+function countdown(n, cb) {
+  if (n <= 0) { cb(); return; }
+  drawBg();
+  if (!ctx) return;
+  const W=canvas.width/devicePixelRatio, H=canvas.height/devicePixelRatio;
+  ctx.fillStyle=T1_COLOR; ctx.font='bold 72px Arial';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(n, W/2, H/2);
+  setTimeout(() => countdown(n-1, cb), 900);
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  TAP HANDLERS
+// ════════════════════════════════════════════════════════════════════
+function tapT1() {
+  if (!t1WinOpen || t1Tapped) return;
+  t1Tapped = true;
+  t1RT     = performance.now() - t1Onset;
+  clearTimeout(t1WinTimeout);
+  t1WinOpen = false;
+  // Visual feedback
+  const b = document.getElementById('btn-t1');
+  b.classList.remove('active'); b.classList.add('done');
+  document.getElementById('hud-t1rt').textContent = Math.round(t1RT) + 'ms';
+  // Open T2 window if T2 is upcoming
+  scheduleT2Window();
+}
+
+function tapT2() {
+  if (!t2WinOpen || t2Tapped) return;
+  t2Tapped = true;
+  t2RT     = performance.now() - t2Onset;
+  clearTimeout(t2WinTimeout);
+  t2WinOpen = false;
+  const b = document.getElementById('btn-t2');
+  b.classList.remove('active'); b.classList.add('done');
+  playBeep();
+}
+
+function scheduleT2Window() {
+  // T2 window opens at T2 onset — handled in stream loop
+  // This is called after T1 tap to ensure T2 button is ready
+  const b2 = document.getElementById('btn-t2');
+  b2.classList.remove('locked','done');
+  // Actual window opens when T2 item fires in the stream
+}
+
+function openT1Window() {
+  t1WinOpen = true; t1Tapped = false;
+  const b = document.getElementById('btn-t1');
+  b.classList.remove('locked','done'); b.classList.add('active');
+  t1WinTimeout = setTimeout(() => {
+    t1WinOpen = false;
+    const b2 = document.getElementById('btn-t1');
+    b2.classList.remove('active'); b2.classList.add('done');
+  }, CFG.t1WinMs);
+}
+
+function openT2Window() {
+  if (!t1Tapped) return; // only open T2 if T1 was acknowledged
+  t2WinOpen = true; t2Tapped = false;
+  const b = document.getElementById('btn-t2');
+  b.classList.remove('locked','done'); b.classList.add('active');
+  t2WinTimeout = setTimeout(() => {
+    t2WinOpen = false;
+    const b2 = document.getElementById('btn-t2');
+    b2.classList.remove('active'); b2.classList.add('locked');
+    finishTrial(); // T2 window closed — trial over
+  }, CFG.t1WinMs);
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  SESSION START
+// ════════════════════════════════════════════════════════════════════
+function startSession() {
+  applySettings();
+  QUEST.reset();
+  resetBinStaircases();
+  trials=[]; currentTrial=0;
+  probeHits={}; probeMisses={}; probeContrasts={};
+  t1RTs=[]; medianT1RT=300;
+
+  canvas = document.getElementById('task-canvas');
+  ctx    = canvas.getContext('2d');
+  function resizeCanvas() {
+    canvas.width  = window.innerWidth  * devicePixelRatio;
+    canvas.height = window.innerHeight * devicePixelRatio;
+    canvas.style.width  = window.innerWidth  + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+    ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+  }
+  resizeCanvas();
+  window.addEventListener('resize', resizeCanvas);
+
+  msPerFrame    = 1000 / (measuredFPS || 120);
+  soaCandidates = buildSOACandidates(msPerFrame);
+
+  // Pre-assign SOAs for all trials
+  for (let i=0; i<TOTAL_TRIALS; i++) {
+    const soa = i < 10
+      ? soaCandidates[Math.floor(Math.random()*soaCandidates.length)]
+      : QUEST.nextSOA(soaCandidates);
+    trials.push({ soa_ms: soa, detected: null, t1RT: null, t2RT: null,
+                  t2Contrast: null, t1Tapped: false });
+  }
+
+  document.getElementById('tap-zone').style.display = 'flex';
+  showScreen('task-screen');
+  countdown(3, () => { sessionActive = true; startTrial(); });
+}
+
+function abortSession() {
+  sessionActive = false;
+  if (animFrame) cancelAnimationFrame(animFrame);
+  clearTimeout(t1WinTimeout); clearTimeout(t2WinTimeout);
+  document.getElementById('tap-zone').style.display = 'none';
+  showScreen('home-screen');
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  TRIAL ENGINE — Stream state machine
+//  Phases: pre → t1 → mask_t1 → lag → t2 → mask_t2 → runout → done
+// ════════════════════════════════════════════════════════════════════
+function startTrial() {
+  if (!sessionActive || currentTrial >= TOTAL_TRIALS) { endSession(); return; }
+
+  const trial = trials[currentTrial];
+  currentSOA_ms  = trial.soa_ms;
+  lagItems       = Math.round(currentSOA_ms / msPerFrame) - 1; // items between T1 and T2
+  lagItemsDone   = 0;
+  runoutDone     = 0;
+  preItemsDone   = 0;
+  preItemsTarget = PRE_T1_MIN + Math.floor(Math.random() * (PRE_T1_MAX - PRE_T1_MIN + 1));
+  t1Tapped  = false; t2Tapped  = false;
+  t1RT      = null;  t2RT      = null;
+  t1WinOpen = false; t2WinOpen = false;
+  maskFrame = false;
+  phase     = 'pre';
+  phaseFrame= 0;
+
+  // Pick T2 contrast for this trial's SOA bin
+  const contrastPct  = getBinContrast(currentSOA_ms);
+  currentT2Color     = contrastToHex(contrastPct);
+  trial.t2Contrast   = contrastPct;
+
+  // Pick T1 digit (1-4) and T2 digit (6-9)
+  const t1Char = T1_POOL[Math.floor(Math.random() * T1_POOL.length)];
+  const t2Char = T2_POOL[Math.floor(Math.random() * T2_POOL.length)];
+  trial.t1Char = t1Char;
+  trial.t2Char = t2Char;
+
+  // Reset buttons
+  ['btn-t1','btn-t2'].forEach(id => {
+    const b = document.getElementById(id);
+    b.classList.remove('active','done');
+    b.classList.add('locked');
+  });
+  document.getElementById('hud-contrast').textContent = contrastPct.toFixed(0) + '%';
+
+  currentItem = { char: pickLetter(), color: DIST_COLOR, role: 'dist' };
+  if (animFrame) cancelAnimationFrame(animFrame);
+  animFrame = requestAnimationFrame(streamLoop);
+}
+
+function pickLetter() {
+  return LETTER_POOL[Math.floor(Math.random() * LETTER_POOL.length)];
+}
+
+// ── Stream loop ────────────────────────────────────────────────────
+function streamLoop() {
+  if (!sessionActive) return;
+  phaseFrame++;
+
+  switch(phase) {
+
+    case 'pre':
+      drawItemFrame();
+      if (phaseFrame >= FRAMES_PER_ITEM) {
+        phaseFrame = 0; preItemsDone++;
+        if (preItemsDone >= preItemsTarget) {
+          // Fire T1
+          phase = 't1';
+          const t = trials[currentTrial];
+          currentItem = { char: t.t1Char, color: T1_COLOR, role: 't1',
+                          font: T1_FONT_FACE };
+        } else {
+          currentItem = { char: pickLetter(), color: DIST_COLOR, role: 'dist' };
+        }
+      }
+      break;
+
+    case 't1':
+      drawItemFrame();
+      if (phaseFrame === 1) {
+        // T1 onset
+        t1Onset = performance.now();
+        openT1Window();
+      }
+      if (phaseFrame >= FRAMES_PER_ITEM) {
+        // T1 done — fire line mask for 1 frame
+        phase = 'mask_t1'; phaseFrame = 0;
+        maskFrame = true;
+      }
+      break;
+
+    case 'mask_t1':
+      drawBg();
+      const W1 = canvas.width/devicePixelRatio, H1 = canvas.height/devicePixelRatio;
+      drawLineMask(ctx, W1/2, H1/2);
+      maskFrame = false;
+      phase = lagItems > 0 ? 'lag' : 't2';
+      phaseFrame = 0;
+      currentItem = { char: pickLetter(), color: DIST_COLOR, role: 'dist' };
+      break;
+
+    case 'lag':
+      drawItemFrame();
+      if (phaseFrame >= FRAMES_PER_ITEM) {
+        phaseFrame = 0; lagItemsDone++;
+        if (lagItemsDone >= lagItems) {
+          phase = 't2'; phaseFrame = 0;
+          const t = trials[currentTrial];
+          currentItem = { char: t.t2Char, color: currentT2Color, role: 't2',
+                          font: DIST_FONT };
+        } else {
+          currentItem = { char: pickLetter(), color: DIST_COLOR, role: 'dist' };
+        }
+      }
+      break;
+
+    case 't2':
+      drawItemFrame();
+      if (phaseFrame === 1) {
+        t2Onset = performance.now();
+        openT2Window();
+      }
+      if (phaseFrame >= FRAMES_PER_ITEM) {
+        phase = 'mask_t2'; phaseFrame = 0;
+        maskFrame = true;
+      }
+      break;
+
+    case 'mask_t2':
+      drawBg();
+      const W2 = canvas.width/devicePixelRatio, H2 = canvas.height/devicePixelRatio;
+      drawLineMask(ctx, W2/2, H2/2);
+      maskFrame = false;
+      phase = 'runout'; phaseFrame = 0;
+      currentItem = { char: pickLetter(), color: DIST_COLOR, role: 'dist' };
+      break;
+
+    case 'runout':
+      drawItemFrame();
+      if (phaseFrame >= FRAMES_PER_ITEM) {
+        phaseFrame = 0; runoutDone++;
+        if (runoutDone >= RUNOUT_ITEMS) {
+          // Stream done — if T2 window still open, close it now
+          if (t2WinOpen) {
+            clearTimeout(t2WinTimeout);
+            t2WinOpen = false;
+            document.getElementById('btn-t2').classList.remove('active');
+            document.getElementById('btn-t2').classList.add('locked');
+            finishTrial();
+            return;
+          }
+          // finishTrial already called by window timeout if window was open
+          // If T1 was never tapped, discard trial
+          if (!t1Tapped) { discardTrial(); return; }
+          return; // finishTrial was called by t2 window timeout
+        } else {
+          currentItem = { char: pickLetter(), color: DIST_COLOR, role: 'dist' };
+        }
+      }
+      break;
+  }
+
+  animFrame = requestAnimationFrame(streamLoop);
+}
+
+function drawBg() {
+  if (!ctx) return;
+  const W = canvas.width/devicePixelRatio, H = canvas.height/devicePixelRatio;
+  ctx.fillStyle = BG_COLOR;
+  ctx.fillRect(0, 0, W, H);
+  // Fixation cross
+  ctx.strokeStyle = FIX_COLOR; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(W/2-10,H/2); ctx.lineTo(W/2+10,H/2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(W/2,H/2-10); ctx.lineTo(W/2,H/2+10); ctx.stroke();
+}
+
+function drawItemFrame() {
+  drawBg();
+  if (currentItem && phaseFrame <= STIM_FRAMES) drawItem(currentItem);
+}
+
+function drawItem(item) {
+  const W = canvas.width/devicePixelRatio, H = canvas.height/devicePixelRatio;
+  ctx.font = item.font || DIST_FONT;
+  ctx.fillStyle = item.color;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(item.char, W/2, H/2);
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  TRIAL COMPLETION
+// ════════════════════════════════════════════════════════════════════
+function discardTrial() {
+  // T1 not tapped — trial invalid, redo slot
+  if (animFrame) cancelAnimationFrame(animFrame);
+  trials[currentTrial].detected = null; // mark invalid
+  currentTrial++;
+  if (currentTrial >= TOTAL_TRIALS) { endSession(); return; }
+  updateHUD();
+  drawBg();
+  setTimeout(startTrial, 300);
+}
+
+function finishTrial() {
+  if (animFrame) cancelAnimationFrame(animFrame);
+  if (!sessionActive) return;
+
+  const trial   = trials[currentTrial];
+  const detected = t2Tapped;
+
+  trial.detected   = detected;
+  trial.t1Tapped   = t1Tapped;
+  trial.t1RT       = t1RT;
+  trial.t2RT       = t2RT;
+
+  if (!t1Tapped) {
+    // T1 not acknowledged — discard (don't feed QUEST)
+    trial.valid = false;
+  } else {
+    trial.valid = true;
+    const soa = currentSOA_ms;
+
+    // Update T1 RT running median
+    if (t1RT !== null) {
+      t1RTs.push(t1RT);
+      t1RTs.sort((a,b)=>a-b);
+      medianT1RT = t1RTs[Math.floor(t1RTs.length/2)];
+    }
+
+    // T1 RT weight: sigmoid centred on medianT1RT
+    // Fast RT (half median) → weight ~0.9, slow RT (2x median) → weight ~0.5
+    const t1Weight = t1RT !== null
+      ? 0.5 + 0.45 * (1 / (1 + Math.exp((t1RT - medianT1RT) / (medianT1RT * 0.4))))
+      : 0.7;
+
+    // Update contrast staircase
+    updateBinStaircase(soa, detected);
+
+    // Track for chart
+    if (!probeHits[soa])     { probeHits[soa]=0; probeMisses[soa]=0; probeContrasts[soa]=[]; }
+    if (detected) probeHits[soa]++; else probeMisses[soa]++;
+    probeContrasts[soa].push(trial.t2Contrast);
+
+    // Feed QUEST weighted by T1 RT
+    QUEST.update(detected ? 1 : 0, soa, t1Weight);
+
+    // Pre-assign next trial SOA
+    const ni = currentTrial + 1;
+    if (ni < TOTAL_TRIALS && trials[ni] && trials[ni].soa_ms === null)
+      trials[ni].soa_ms = QUEST.nextSOA(soaCandidates);
+  }
+
+  currentTrial++;
+  updateHUD();
+  drawBg();
+  if (currentTrial >= TOTAL_TRIALS) { endSession(); return; }
+
+  // Brief gap then next trial (no ITI — just enough for buttons to reset visually)
+  setTimeout(startTrial, 200 + Math.random()*150);
+}
+
+function updateHUD() {
+  document.getElementById('hud-trial').textContent = `${currentTrial} / ${TOTAL_TRIALS}`;
+  const c = (QUEST.confidence()*100).toFixed(0);
+  document.getElementById('hud-conf').style.width = c + '%';
+  if (medianT1RT) {
+    document.getElementById('hud-t1rt').textContent = Math.round(medianT1RT) + 'ms';
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  AUDIO
+// ════════════════════════════════════════════════════════════════════
+let audioCtx = null;
+function playBeep() {
+  try {
+    if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state==='suspended') audioCtx.resume();
+    const osc=audioCtx.createOscillator(), gain=audioCtx.createGain();
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.type='sine'; osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+    gain.gain.setValueAtTime(0.18, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime+0.08);
+    osc.start(audioCtx.currentTime); osc.stop(audioCtx.currentTime+0.08);
+  } catch(e) {}
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  END SESSION & RESULTS
+// ════════════════════════════════════════════════════════════════════
+function endSession() {
+  sessionActive = false;
+  if (animFrame) cancelAnimationFrame(animFrame);
+  window.removeEventListener('resize', ()=>{});
+  document.getElementById('tap-zone').style.display = 'none';
+
+  const thetaHz  = QUEST.meanFreq();
+  const thetaMAP = QUEST.mapFreq();
+  const troughMs = QUEST.meanTroughMs();
+  const ampVal   = QUEST.meanAmp();
+  const baseP    = QUEST.meanBase();
+  const basePct  = (baseP*100).toFixed(1);
+
+  let minP = baseP;
+  Object.keys(probeHits).forEach(s => {
+    const t = (probeHits[s]||0)+(probeMisses[s]||0);
+    if(t>=3){ const p=probeHits[s]/t; if(p<minP) minP=p; }
+  });
+  const blinkDepth = ((baseP-minP)*100).toFixed(0);
+
+  const sparingMs  = Math.round(250 / thetaHz);
+  const recoveryMs = Math.round(1000 / thetaHz);
+  const conf       = QUEST.confidence();
+  const confPct    = (conf*100).toFixed(0);
+  const confLabel  = conf<0.3?'Low':conf<0.55?'Moderate':conf<0.78?'Good':'High';
+  const confColor  = conf<0.3?'var(--danger)':conf<0.55?'var(--warning)':conf<0.78?'var(--theta)':'var(--success)';
+
+  document.getElementById('res-hz').textContent      = thetaHz.toFixed(2);
+  document.getElementById('res-unit').textContent    = `Hz  ·  MAP ${thetaMAP.toFixed(2)} Hz`;
+  document.getElementById('res-period').textContent  = Math.round(troughMs) + ' ms';
+  document.getElementById('res-depth').textContent   = blinkDepth + '%';
+  document.getElementById('res-baseline').textContent= basePct + '% (prior)';
+  document.getElementById('res-tau').textContent     = `A=${ampVal.toFixed(2)}`;
+  document.getElementById('conf-bar').style.width    = confPct + '%';
+  document.getElementById('conf-label').textContent  = `${confLabel} · ${confPct}%`;
+  document.getElementById('conf-label').style.color  = confColor;
+
+  const validTrials = trials.filter(t=>t.valid).length;
+  const discarded   = trials.filter(t=>t.valid===false).length;
+  const t1RTMean    = t1RTs.length ? Math.round(t1RTs.reduce((a,b)=>a+b,0)/t1RTs.length) : '—';
+
+  const freqInterp = thetaHz > 6.0
+    ? 'Fast theta — short cycle, early trough. Consistent with high alertness.'
+    : thetaHz < 4.0
+    ? 'Slow theta — long cycle, late trough. May reflect elevated cognitive load or fatigue.'
+    : 'Mid-range theta — aligns with canonical AB literature (Bonnefond & Jensen 2012).';
+
+  document.getElementById('blink-interp').innerHTML =
+    `Theta reset by T1 at <strong>${thetaHz.toFixed(2)} Hz</strong> (MAP: ${thetaMAP.toFixed(2)} Hz). ` +
+    `Trough ~${Math.round(troughMs)} ms, lag-1 sparing ~${sparingMs} ms, recovery ~${recoveryMs} ms. ` +
+    `Blink depth A=${ampVal.toFixed(2)} (model), ↓${blinkDepth}% (empirical). ${freqInterp}` +
+    `<br><br>Valid trials: <strong>${validTrials}</strong> / ${TOTAL_TRIALS} (${discarded} discarded — T1 not tapped). ` +
+    `Mean T1 RT: <strong>${t1RTMean} ms</strong>. ` +
+    `<br>Confidence: <strong style="color:${confColor}">${confLabel} (${confPct}%)</strong>. ` +
+    `${conf<0.5?'Posterior broad — run another session.':'Posterior focused. This frequency may be your neural fingerprint.'}`;
+
+  drawSOAChart(baseP, troughMs);
+  drawContrastChart();
+  drawFreqChart();
+  saveResult(thetaHz, thetaMAP, troughMs, ampVal, basePct, blinkDepth, confPct);
+  showScreen('results-screen');
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  CHARTS
+// ════════════════════════════════════════════════════════════════════
+function drawSOAChart(baseP, troughMs) {
+  const el=document.getElementById('soa-chart');
+  const ctx2=el.getContext('2d');
+  const W=el.parentElement.offsetWidth-2, H=170;
+  el.width=W*devicePixelRatio; el.height=H*devicePixelRatio;
+  el.style.width=W+'px'; el.style.height=H+'px';
+  ctx2.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+  ctx2.clearRect(0,0,W,H);
+  const pad={l:36,r:12,t:12,b:30};
+  const cW=W-pad.l-pad.r, cH=H-pad.t-pad.b;
+  for(let i=0;i<=4;i++){
+    const y=pad.t+cH*(1-i/4);
+    ctx2.strokeStyle='rgba(28,28,46,1)'; ctx2.lineWidth=1;
+    ctx2.beginPath();ctx2.moveTo(pad.l,y);ctx2.lineTo(pad.l+cW,y);ctx2.stroke();
+    ctx2.fillStyle='rgba(90,90,122,0.65)';ctx2.font='8px Space Mono';ctx2.textAlign='right';
+    ctx2.fillText((i*25)+'%',pad.l-3,y+3);
+  }
+  const keys=Object.keys(probeHits).map(Number).sort((a,b)=>a-b);
+  if(keys.length<2) return;
+  const modelMin=50, modelMax=600, mR=modelMax-modelMin;
+  const msx=s=>pad.l+(s-modelMin)/mR*cW;
+  const py=p=>pad.t+cH*(1-p);
+  ctx2.strokeStyle='rgba(0,229,255,0.6)';ctx2.lineWidth=2;ctx2.setLineDash([]);
+  ctx2.beginPath();let first=true;
+  for(let s=modelMin;s<=modelMax;s+=4){
+    const p=QUEST.predictP(s),x=msx(s),y=py(p);
+    first?ctx2.moveTo(x,y):ctx2.lineTo(x,y);first=false;
+  }
+  ctx2.stroke();
+  if(troughMs>=modelMin&&troughMs<=modelMax){
+    ctx2.strokeStyle='rgba(255,157,0,0.5)';ctx2.lineWidth=1;ctx2.setLineDash([3,3]);
+    ctx2.beginPath();ctx2.moveTo(msx(troughMs),pad.t);ctx2.lineTo(msx(troughMs),pad.t+cH);ctx2.stroke();
+    ctx2.setLineDash([]);
+    ctx2.fillStyle='rgba(255,157,0,0.7)';ctx2.font='8px Space Mono';ctx2.textAlign='center';
+    ctx2.fillText('T/2',msx(troughMs),pad.t+8);
+  }
+  ctx2.strokeStyle='rgba(57,255,138,0.38)';ctx2.lineWidth=1;ctx2.setLineDash([2,4]);
+  ctx2.beginPath();ctx2.moveTo(pad.l,py(baseP));ctx2.lineTo(pad.l+cW,py(baseP));ctx2.stroke();
+  ctx2.setLineDash([]);
+  keys.forEach(soa=>{
+    const tot=(probeHits[soa]||0)+(probeMisses[soa]||0);
+    if(!tot) return;
+    const p=probeHits[soa]/tot,x=msx(soa),y=py(p),r=Math.max(3,Math.min(8,tot));
+    ctx2.fillStyle='rgba(0,229,255,0.15)';ctx2.beginPath();ctx2.arc(x,y,r,0,Math.PI*2);ctx2.fill();
+    ctx2.strokeStyle='#00e5ff';ctx2.lineWidth=1.5;ctx2.beginPath();ctx2.arc(x,y,r,0,Math.PI*2);ctx2.stroke();
+  });
+  ctx2.fillStyle='rgba(90,90,122,0.6)';ctx2.font='8px Space Mono';ctx2.textAlign='center';
+  [50,150,300,450,600].forEach(s=>ctx2.fillText(s+'ms',msx(s),pad.t+cH+19));
+  ctx2.fillStyle='rgba(0,229,255,0.55)';ctx2.textAlign='right';ctx2.fillText('— model',pad.l+cW,pad.t+10);
+  ctx2.fillStyle='rgba(57,255,138,0.45)';ctx2.fillText('— baseline',pad.l+cW,pad.t+21);
+}
+
+function drawContrastChart() {
+  const el=document.getElementById('contrast-chart');
+  const ctx2=el.getContext('2d');
+  const W=el.parentElement.offsetWidth-2, H=130;
+  el.width=W*devicePixelRatio; el.height=H*devicePixelRatio;
+  el.style.width=W+'px'; el.style.height=H+'px';
+  ctx2.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+  ctx2.clearRect(0,0,W,H);
+  const pad={l:36,r:12,t:12,b:30};
+  const cW=W-pad.l-pad.r, cH=H-pad.t-pad.b;
+  // Y axis: contrast %
+  const maxC = CFG.t2ContrastStart + CFG.t2ContrastRange + 5;
+  for(let i=0;i<=4;i++){
+    const y=pad.t+cH*(1-i/4);
+    ctx2.strokeStyle='rgba(28,28,46,1)';ctx2.lineWidth=1;
+    ctx2.beginPath();ctx2.moveTo(pad.l,y);ctx2.lineTo(pad.l+cW,y);ctx2.stroke();
+    ctx2.fillStyle='rgba(90,90,122,0.65)';ctx2.font='8px Space Mono';ctx2.textAlign='right';
+    ctx2.fillText(Math.round(i*maxC/4)+'%',pad.l-3,y+3);
+  }
+  // Plot mean contrast per bin
+  const binCentres = CONTRAST_BINS.map(b=>(b.lo+b.hi)/2);
+  const binMeans   = CONTRAST_BINS.map((_,bi)=>{
+    const s = BIN_STAIRCASES[bi];
+    if (!s || !s.history.length) return null;
+    // Use final staircase value as the converged threshold estimate
+    return s.contrast;
+  });
+  const modelMin=50, modelMax=600, mR=modelMax-modelMin;
+  const msx=s=>pad.l+(s-modelMin)/mR*cW;
+  const cy=c=>pad.t+cH*(1-c/maxC);
+
+  // Connect points
+  ctx2.strokeStyle='rgba(255,157,0,0.8)';ctx2.lineWidth=2;ctx2.setLineDash([]);
+  ctx2.beginPath(); let first=true;
+  binMeans.forEach((m,i)=>{
+    if(m===null) return;
+    const x=msx(binCentres[i]), y=cy(m);
+    first?ctx2.moveTo(x,y):ctx2.lineTo(x,y); first=false;
+  });
+  ctx2.stroke();
+
+  // Dots
+  binMeans.forEach((m,i)=>{
+    if(m===null) return;
+    const x=msx(binCentres[i]), y=cy(m);
+    ctx2.fillStyle='rgba(255,157,0,0.25)';ctx2.beginPath();ctx2.arc(x,y,6,0,Math.PI*2);ctx2.fill();
+    ctx2.strokeStyle='var(--amber)';ctx2.lineWidth=1.5;ctx2.beginPath();ctx2.arc(x,y,6,0,Math.PI*2);ctx2.stroke();
+    ctx2.fillStyle='var(--amber)';ctx2.font='bold 8px Space Mono';ctx2.textAlign='center';
+    ctx2.fillText(m.toFixed(0)+'%',x,y-10);
+  });
+
+  ctx2.fillStyle='rgba(90,90,122,0.6)';ctx2.font='8px Space Mono';ctx2.textAlign='center';
+  [50,150,300,450,600].forEach(s=>ctx2.fillText(s+'ms',msx(s),pad.t+cH+19));
+  ctx2.fillStyle='rgba(255,157,0,0.7)';ctx2.textAlign='right';
+  ctx2.fillText('— threshold contrast',pad.l+cW,pad.t+10);
+}
+
+function drawFreqChart() {
+  const el=document.getElementById('freq-chart');
+  const ctx2=el.getContext('2d');
+  const W=el.parentElement.offsetWidth-2, H=100;
+  el.width=W*devicePixelRatio; el.height=H*devicePixelRatio;
+  el.style.width=W+'px'; el.style.height=H+'px';
+  ctx2.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+  ctx2.clearRect(0,0,W,H);
+  const post=QUEST.freqPost(), grid=QUEST.fGrid, nF=QUEST.nF;
+  const pad={l:26,r:10,t:12,b:22};
+  const cW=W-pad.l-pad.r, cH=H-pad.t-pad.b;
+  const maxP=Math.max(...post)||1, bw=cW/nF*0.78;
+  post.forEach((p,i)=>{
+    const x=pad.l+(i+0.5)*cW/nF-bw/2, bh=(p/maxP)*cH;
+    ctx2.fillStyle=`rgba(0,229,255,${(0.15+p/maxP*0.75).toFixed(2)})`;
+    ctx2.fillRect(x,pad.t+cH-bh,bw,bh);
+  });
+  const mapF=QUEST.mapFreq();
+  const mapI=grid.reduce((bi,v,i)=>Math.abs(v-mapF)<Math.abs(grid[bi]-mapF)?i:bi,0);
+  const mx=pad.l+(mapI+0.5)*cW/nF;
+  ctx2.strokeStyle='rgba(0,229,255,0.9)';ctx2.lineWidth=1.5;
+  ctx2.beginPath();ctx2.moveTo(mx,pad.t);ctx2.lineTo(mx,pad.t+cH);ctx2.stroke();
+  ctx2.fillStyle='var(--theta)';ctx2.font='bold 9px Space Mono';ctx2.textAlign='center';
+  ctx2.fillText(mapF.toFixed(1)+'Hz',mx,pad.t+8);
+  ctx2.fillStyle='rgba(90,90,122,0.55)';ctx2.font='8px Space Mono';ctx2.textAlign='center';
+  [0,Math.floor(nF/2),nF-1].forEach(i=>ctx2.fillText(grid[i].toFixed(1)+'Hz',pad.l+(i+0.5)*cW/nF,pad.t+cH+14));
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  CSV EXPORT
+// ════════════════════════════════════════════════════════════════════
+function downloadCSV() {
+  let csv = 'Trial,SOA_ms,T1_Char,T2_Char,T1_Tapped,T1_RT_ms,T2_Detected,T2_RT_ms,T2_Contrast_pct,Valid\n';
+  trials.forEach((t,i) => {
+    if (t.detected === null && t.valid !== false) return;
+    csv += `${i+1},${t.soa_ms??''},${t.t1Char??''},${t.t2Char??''},` +
+           `${t.t1Tapped?1:0},${t.t1RT!==null?Math.round(t.t1RT):''},` +
+           `${t.detected?1:0},${t.t2RT!==null?Math.round(t.t2RT):''},` +
+           `${t.t2Contrast!==null?t.t2Contrast.toFixed(1):''},${t.valid?1:0}\n`;
+  });
+  csv += `\nSummary\n`;
+  csv += `Paradigm,Twitch v2.0\n`;
+  csv += `Model,Damped Sine (tau=250ms)\n`;
+  csv += `Freq_Hz_mean,${QUEST.meanFreq().toFixed(4)}\n`;
+  csv += `Freq_Hz_MAP,${QUEST.mapFreq().toFixed(4)}\n`;
+  csv += `Trough_ms_mean,${QUEST.meanTroughMs().toFixed(2)}\n`;
+  csv += `Amp_mean,${QUEST.meanAmp().toFixed(4)}\n`;
+  csv += `Base_mean,${QUEST.meanBase().toFixed(4)}\n`;
+  csv += `Confidence_pct,${(QUEST.confidence()*100).toFixed(2)}\n`;
+  csv += `Valid_trials,${trials.filter(t=>t.valid).length}\n`;
+  csv += `Discarded_trials,${trials.filter(t=>t.valid===false).length}\n`;
+  const t1RTMean = t1RTs.length ? Math.round(t1RTs.reduce((a,b)=>a+b,0)/t1RTs.length) : '';
+  csv += `Mean_T1_RT_ms,${t1RTMean}\n`;
+  csv += `Median_T1_RT_ms,${t1RTs.length ? Math.round(medianT1RT) : ''}\n`;
+  // Per-bin contrast thresholds
+  CONTRAST_BINS.forEach((b,bi) => {
+    const s = BIN_STAIRCASES[bi];
+    if (s) csv += `Contrast_${b.label},${s.contrast.toFixed(1)}%,reversals=${s.reversals}\n`;
+  });
+
+  const blob=new Blob([csv],{type:'text/csv'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.download=`theta_v2_${Date.now()}.csv`; a.click();
+  URL.revokeObjectURL(url);
+  toast('CSV exported');
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  STORAGE
+// ════════════════════════════════════════════════════════════════════
+function saveResult(hz, mapHz, troughMs, ampVal, baselineRate, blinkDepth, confPct) {
+  const h = JSON.parse(localStorage.getItem('theta_history')||'[]');
+  h.unshift({
+    hz: parseFloat(hz).toFixed(2), mapHz: parseFloat(mapHz).toFixed(2),
+    troughMs: Math.round(troughMs), amp: parseFloat(ampVal).toFixed(2),
+    baselineRate, blinkDepth, confPct,
+    trials: trials.filter(t=>t.valid).length,
+    paradigm: 'v2.0',
+    date: new Date().toLocaleDateString(),
+    time: new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})
+  });
+  if(h.length>30) h.splice(30);
+  localStorage.setItem('theta_history', JSON.stringify(h));
+}
+
+function renderHistory() {
+  const list = document.getElementById('history-list');
+  const h    = JSON.parse(localStorage.getItem('theta_history')||'[]');
+  if (!h.length) {
+    list.innerHTML = '<div style="color:var(--muted);font-size:12px;text-align:center;padding:32px;">No sessions yet.</div>';
+    return;
+  }
+  list.innerHTML = h.map(s => `
+    <div class="history-entry">
+      <div>
+        <div class="history-hz">${s.hz} Hz${s.paradigm?' <span style="font-size:9px;color:var(--muted)">'+s.paradigm+'</span>':''}</div>
+        <div class="history-conf">trough ${s.troughMs??'—'}ms · A=${s.amp??'—'} · Blink ↓${s.blinkDepth}% · Conf ${s.confPct}%</div>
+      </div>
+      <div class="history-meta">${s.date}<br>${s.time}<br>${s.trials} trials</div>
+    </div>`).join('');
+}
+
+function clearHistory() {
+  if (confirm('Clear all session history?')) {
+    localStorage.removeItem('theta_history'); renderHistory();
+  }
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
+initSettings();
+</script>
+</body>
+</html>
