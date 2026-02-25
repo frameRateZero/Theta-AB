@@ -678,28 +678,30 @@ function grayToHex(g) {
   return '#' + h + h + h;
 }
 
+function getEl(id) { return document.getElementById(id); }
+function setLbl(id, val) { const e=getEl(id); if(e) e.textContent=val; }
+
 function updateSettings() {
-  CFG.framesPerItem = parseInt(document.getElementById('sl-speed').value);
-  const ms = Math.round(CFG.framesPerItem * (1000/120));
-  document.getElementById('lbl-speed').textContent = ms + 'ms/item';
+  const speed = getEl('sl-speed');
+  if (speed) { CFG.framesPerItem = parseInt(speed.value); setLbl('lbl-speed', Math.round(CFG.framesPerItem*(1000/120))+'ms/item'); }
 
-  CFG.t1FontPx = parseInt(document.getElementById('sl-t1font').value);
-  document.getElementById('lbl-t1font').textContent = CFG.t1FontPx + 'px';
+  const font = getEl('sl-t1font');
+  if (font) { CFG.t1FontPx = parseInt(font.value); setLbl('lbl-t1font', CFG.t1FontPx+'px'); }
 
-  CFG.t2ContrastStart = parseInt(document.getElementById('sl-t2contrast').value);
-  document.getElementById('lbl-t2contrast').textContent = CFG.t2ContrastStart + '%';
+  const ct = getEl('sl-t2contrast');
+  if (ct) { CFG.t2ContrastStart = parseInt(ct.value); setLbl('lbl-t2contrast', CFG.t2ContrastStart+'%'); }
 
-  CFG.t2ContrastRange = parseInt(document.getElementById('sl-contrast-range').value);
-  document.getElementById('lbl-contrast-range').textContent = '±' + CFG.t2ContrastRange + '%';
+  const cr = getEl('sl-contrast-range');
+  if (cr) { CFG.t2ContrastRange = parseInt(cr.value); setLbl('lbl-contrast-range', '±'+CFG.t2ContrastRange+'%'); }
 
-  CFG.soaMaxMs = parseInt(document.getElementById('sl-soamax').value);
-  document.getElementById('lbl-soamax').textContent = CFG.soaMaxMs + 'ms';
+  const soa = getEl('sl-soamax');
+  if (soa) { CFG.soaMaxMs = parseInt(soa.value); setLbl('lbl-soamax', CFG.soaMaxMs+'ms'); }
 
-  CFG.totalTrials = parseInt(document.getElementById('sl-trials').value);
-  document.getElementById('lbl-trials').textContent = CFG.totalTrials;
+  const tr = getEl('sl-trials');
+  if (tr) { CFG.totalTrials = parseInt(tr.value); setLbl('lbl-trials', CFG.totalTrials); }
 
-  CFG.t1WinMs = parseInt(document.getElementById('sl-t1win').value);
-  document.getElementById('lbl-t1win').textContent = CFG.t1WinMs + 'ms';
+  const tw = getEl('sl-t1win');
+  if (tw) { CFG.t1WinMs = parseInt(tw.value); setLbl('lbl-t1win', CFG.t1WinMs+'ms'); }
 }
 
 function applySettings() {
@@ -1486,7 +1488,11 @@ function clearHistory() {
 
 // ── Boot ──────────────────────────────────────────────────────────────
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
-initSettings();
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initSettings);
+} else {
+  initSettings();
+}
 </script>
 </body>
 </html>
