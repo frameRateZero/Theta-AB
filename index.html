@@ -736,9 +736,14 @@ const QUEST = (() => {
 // ════════════════════════════════════════════════════════════════════
 let stimCandidates = [];
 
+// SOA_FLOOR: below this is sensory masking territory, not attentional blink.
+// Lag-1 suppression at <200ms is driven by T1 backward masking, not theta.
+const SOA_FLOOR_MS = 200;
+
 function buildStimCandidates(mspf) {
-  const minMs  = 50;
+  const minMs  = SOA_FLOOR_MS;  // floor: exclude masking-dominated SOAs
   const maxMs  = CFG.soaMaxMs;
+
   // 15 SOA values, quantised to frame boundaries
   const nSOA   = 15;
   const soaSet = new Set();
@@ -753,13 +758,50 @@ function buildStimCandidates(mspf) {
   const nC = 8;
   const contrastCands = Array.from({length:nC}, (_,i) =>
     Math.round(5 * Math.pow(90/5, i/(nC-1)))
-  ).filter((v,i,a) => a.indexOf(v)===i); // unique
+  ).filter((v,i,a) => a.indexOf(v)===i);
 
   const cands = [];
   soaCands.forEach(soa =>
     contrastCands.forEach(c => cands.push({soa_ms:soa, contrast_pct:c}))
   );
   return cands;
+}
+
+// ── Trough-targeted exploration pools ────────────────────────────────
+// Built each time we schedule a stim so they track the current posterior.
+// Returns candidates concentrated around trough 2 and trough 3 estimates,
+// with contrast spanning the full range (so we learn the threshold there).
+function buildTroughExploreCandidates(mspf) {
+  const tr      = QUEST.troughs();       // [{n, soa_ms, threshold_pct}]
+  const trough2 = tr[1].soa_ms;
+  const trough3 = tr[2].soa_ms;
+  const maxMs   = CFG.soaMaxMs;
+
+  // Window: ±25% of trough SOA, quantised to frames, clipped to [SOA_FLOOR, soaMax]
+  function troughWindow(centre) {
+    const width = Math.round(centre * 0.25);
+    const soaSet = new Set();
+    for (let delta = -width; delta <= width; delta += Math.round(mspf)) {
+      const ms     = Math.max(SOA_FLOOR_MS, Math.min(maxMs, centre + delta));
+      const frames = Math.round(ms / mspf);
+      soaSet.add(Math.round(frames * mspf));
+    }
+    return [...soaSet];
+  }
+
+  const soaCands = [
+    ...troughWindow(trough2),
+    ...troughWindow(trough3),
+  ].filter((v,i,a) => a.indexOf(v) === i);
+
+  // Contrast: linear 10–90% in 8 steps (want to bracket the threshold)
+  const contrastCands = [10, 18, 28, 40, 55, 70, 82, 90];
+
+  const cands = [];
+  soaCands.forEach(soa =>
+    contrastCands.forEach(c => cands.push({soa_ms: soa, contrast_pct: c}))
+  );
+  return cands.length > 0 ? cands : stimCandidates; // safety fallback
 }
 
 let currentContrast_pct = 40;
@@ -992,6 +1034,7 @@ function startSession() {
   // Pre-assign warm-up trials only (random SOA, visible contrast).
   // EIG trials are assigned one-at-a-time after each trial completes
   // — never in a loop, to avoid blocking the main thread.
+  // soaList already respects SOA_FLOOR_MS (built into stimCandidates)
   const soaList = [...new Set(stimCandidates.map(c=>c.soa_ms))];
   for (let i=0; i<TOTAL_TRIALS; i++) {
     if (i < 8) {   // 8 random warm-up; EIG takes over from trial 8
@@ -1268,15 +1311,22 @@ function finishTrial() {
     if (detected) probeHits[soa]++; else probeMisses[soa]++;
     probeContrasts[soa].push(trial.t2Contrast);
 
-    // Schedule EIG async during ITI — never blocks main thread.
-    // Targets ni+1 (two ahead); falls back to ni if that's the null one.
+    // Schedule next stim async during ITI.
+    // Strategy: 25% of post-warmup trials explore trough 2/3 explicitly.
+    // Remaining 75% use EIG on the full candidate grid.
+    // This prevents the posterior collapsing onto trough 1 forever.
     const ni  = currentTrial + 1;
     const ni2 = currentTrial + 2;
     const tgt = (ni2 < TOTAL_TRIALS && trials[ni2] && trials[ni2].soa_ms === null) ? ni2
               : (ni  < TOTAL_TRIALS && trials[ni]  && trials[ni].soa_ms  === null) ? ni
               : -1;
     if (tgt >= 0) {
-      QUEST.scheduleNextStim(stimCandidates, stim => {
+      // Decide pool: 25% exploration (trough 2/3 targeted), 75% EIG
+      const useExplore = (currentTrial >= 8) && (Math.random() < 0.25);
+      const pool = useExplore
+        ? buildTroughExploreCandidates(msPerFrame)
+        : stimCandidates;
+      QUEST.scheduleNextStim(pool, stim => {
         if (trials[tgt]) {
           trials[tgt].soa_ms       = stim.soa_ms;
           trials[tgt].contrast_pct = stim.contrast_pct;
@@ -1347,7 +1397,7 @@ function endSession() {
   document.getElementById('res-hz').textContent      = thetaHz.toFixed(2);
   document.getElementById('res-unit').textContent    = `Hz  ·  MAP ${thetaMAP.toFixed(2)} Hz`;
   document.getElementById('res-period').textContent  = `${trough1.soa_ms} ms  ·  τ=${Math.round(tauMs)} ms`;
-  document.getElementById('res-depth').textContent   = `${trough1.threshold_pct}% / ${trough2.threshold_pct}% / ${trough3.threshold_pct}%`;
+  document.getElementById('res-depth').textContent   = `T1:${trough1.threshold_pct}%@${trough1.soa_ms}ms · T2:${trough2.threshold_pct}%@${trough2.soa_ms}ms · T3:${trough3.threshold_pct}%@${trough3.soa_ms}ms`;
   document.getElementById('res-baseline').textContent= `${baseC.toFixed(1)}% contrast`;
   document.getElementById('res-tau').textContent     = `A=${ampVal.toFixed(1)}%`;
   document.getElementById('conf-bar').style.width    = confPct + '%';
@@ -1359,16 +1409,16 @@ function endSession() {
   const t1RTMean    = t1RTs.length ? Math.round(t1RTs.reduce((a,b)=>a+b,0)/t1RTs.length) : '—';
 
   const freqInterp = thetaHz > 6.5
-    ? 'Fast theta — short cycle, troughs arrive early.'
+    ? `Fast theta — short cycle (${Math.round(1000/thetaHz)}ms). Troughs arrive early.`
     : thetaHz < 3.5
-    ? 'Slow theta — long cycle, deep single blink, late recovery.'
-    : 'Mid-range theta — canonical AB range (Bonnefond & Jensen 2012).';
+    ? `Slow theta — long cycle (${Math.round(1000/thetaHz)}ms). Wide blink window.`
+    : `Mid-range theta (${Math.round(1000/thetaHz)}ms cycle) — canonical AB range.`;
 
   const tauInterp = tauMs > 600
-    ? 'Long decay — 2nd and 3rd troughs likely visible.'
+    ? `Long decay (τ=${Math.round(tauMs)}ms) — 2nd trough at ${trough2.soa_ms}ms is ${trough2.threshold_pct}% threshold, 3rd at ${trough3.soa_ms}ms is ${trough3.threshold_pct}%. All three measurable.`
     : tauMs > 300
-    ? 'Moderate decay — 2nd trough shallow but measurable.'
-    : 'Short decay — blink resolves quickly, 2nd trough near floor.';
+    ? `Moderate decay (τ=${Math.round(tauMs)}ms) — 2nd trough at ${trough2.soa_ms}ms is ${trough2.threshold_pct}% threshold. 3rd trough shallow.`
+    : `Fast decay (τ=${Math.round(tauMs)}ms) — blink resolves quickly. 2nd/3rd troughs near baseline.`;
 
   document.getElementById('blink-interp').innerHTML =
     `<strong>${thetaHz.toFixed(2)} Hz</strong> theta (MAP: ${thetaMAP.toFixed(2)} Hz) · τ=${Math.round(tauMs)} ms decay. ` +
@@ -1577,6 +1627,7 @@ function downloadCSV() {
   csv += `Model,Contrast-Threshold Damped Sine Surface\n`;
   csv += `\nSettings\n`;
   csv += `FPS_measured,${measuredFPS}\n`;
+  csv += `SOA_floor_ms,${SOA_FLOOR_MS}\n`;
   csv += `Frames_per_item,${CFG.framesPerItem}\n`;
   csv += `Item_duration_ms,${Math.round(CFG.framesPerItem*(1000/measuredFPS))}\n`;
   csv += `SOA_max_ms,${CFG.soaMaxMs}\n`;
