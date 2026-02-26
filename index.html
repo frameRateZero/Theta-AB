@@ -1056,7 +1056,7 @@ function startTrial() {
   // Reset windows — close any stale windows from previous trial
   t1WinOpen = false; t2WinOpen = false;
   document.getElementById('tap-indicator').classList.remove('tapped');
-  document.getElementById('hud-contrast').textContent = contrastPct.toFixed(0) + '%';
+  document.getElementById('hud-contrast').textContent = currentContrast_pct.toFixed(0) + '%';
 
   currentItem = { char: pickLetter(), color: DIST_COLOR, role: 'dist' };
   if (animFrame) cancelAnimationFrame(animFrame);
