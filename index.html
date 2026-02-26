@@ -799,45 +799,48 @@ function countdown(n, cb) {
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  TAP HANDLER — single button, first tap = T1, second tap = T2
+//  TAP HANDLER — single button
+//  Stream runs autonomously at fixed SOA regardless of tapping.
+//  Tap 1 (after T1 onset) = "saw T1"   → records T1 RT
+//  Tap 2 (after T2 onset) = "saw T2"   → records T2 RT
+//  Both taps may arrive during runout or even after stream ends.
+//  1 tap only = T1 seen, T2 missed. 2 taps = both seen.
 // ════════════════════════════════════════════════════════════════════
 function handleTap() {
+  if (!sessionActive) return;
+  const now = performance.now();
+
+  // Brief visual pulse
   const btn = document.getElementById('btn-tap');
-  // Brief visual pulse, auto-clear
   btn.classList.add('tapped');
   setTimeout(() => btn.classList.remove('tapped'), 120);
 
+  // First tap after T1 onset and before T1 is already recorded
   if (t1WinOpen && !t1Tapped) {
-    // First tap: record T1
-    t1Tapped  = true;
-    t1RT      = performance.now() - t1Onset;
-    clearTimeout(t1WinTimeout);
-    t1WinOpen = false;
+    t1Tapped = true;
+    t1RT     = now - t1Onset;
     document.getElementById('hud-t1rt').textContent = Math.round(t1RT) + 'ms';
     return;
   }
 
+  // Second tap after T2 onset and before T2 is already recorded
   if (t2WinOpen && !t2Tapped) {
-    // Second tap: record T2
-    t2Tapped  = true;
-    t2RT      = performance.now() - t2Onset;
-    t2WinOpen = false;
+    t2Tapped = true;
+    t2RT     = now - t2Onset;
     playBeep();
     return;
   }
 }
 
 function openT1Window() {
-  // Close any lingering T2 window from previous trial without finishing
-  // (T2 window stays open until T1 fires next trial — handled in startTrial)
-  t1WinOpen = true; t1Tapped = false;
-  // No timeout — window stays open until T2 phase or trial end
+  // Called at T1 onset. Stream continues independently.
+  t1WinOpen = true;
 }
 
 function openT2Window() {
-  // T2 window opens at T2 onset and stays open until next T1
-  // finishTrial() is driven by the stream (runout end), not a timeout
-  t2WinOpen = true; t2Tapped = false;
+  // Called at T2 onset (fixed SOA after T1 onset, stream-driven).
+  // Window stays open through runout and until next trial starts.
+  t2WinOpen = true;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -897,7 +900,13 @@ function startTrial() {
 
   const trial = trials[currentTrial];
   currentSOA_ms  = trial.soa_ms;
-  lagItems       = Math.round(currentSOA_ms / msPerFrame) - 1; // items between T1 and T2
+  // lagItems = distractor items between T1 offset and T2 onset
+  // SOA_frames = round(SOA_ms / msPerFrame); T1 takes FRAMES_PER_ITEM frames.
+  // Remaining frames after T1 = SOA_frames - FRAMES_PER_ITEM.
+  // Whole distractor items that fit = floor of that / FRAMES_PER_ITEM.
+  lagItems = Math.max(0, Math.floor(
+    (Math.round(currentSOA_ms / msPerFrame) - FRAMES_PER_ITEM) / FRAMES_PER_ITEM
+  ));
   lagItemsDone   = 0;
   runoutDone     = 0;
   preItemsDone   = 0;
@@ -920,8 +929,8 @@ function startTrial() {
   trial.t1Char = t1Char;
   trial.t2Char = t2Char;
 
-  // Reset single tap button; close any stale T2 window from previous trial
-  t2WinOpen = false;
+  // Reset windows — close any stale windows from previous trial
+  t1WinOpen = false; t2WinOpen = false;
   document.getElementById('btn-tap').classList.remove('tapped');
   document.getElementById('hud-contrast').textContent = contrastPct.toFixed(0) + '%';
 
