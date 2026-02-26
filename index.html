@@ -1575,6 +1575,16 @@ function downloadCSV() {
   csv += `\nSummary\n`;
   csv += `Paradigm,Twitch v2.0\n`;
   csv += `Model,Contrast-Threshold Damped Sine Surface\n`;
+  csv += `\nSettings\n`;
+  csv += `FPS_measured,${measuredFPS}\n`;
+  csv += `Frames_per_item,${CFG.framesPerItem}\n`;
+  csv += `Item_duration_ms,${Math.round(CFG.framesPerItem*(1000/measuredFPS))}\n`;
+  csv += `SOA_max_ms,${CFG.soaMaxMs}\n`;
+  csv += `Total_trials,${CFG.totalTrials}\n`;
+  csv += `Mask_enabled,${CFG.maskEnabled}\n`;
+  csv += `Date,${new Date().toLocaleDateString()}\n`;
+  csv += `Time,${new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}\n`;
+  csv += `\n`;
   const tr = QUEST.troughs();
   csv += `Freq_Hz_mean,${QUEST.meanFreq().toFixed(4)}\n`;
   csv += `Freq_Hz_MAP,${QUEST.mapFreq().toFixed(4)}\n`;
