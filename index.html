@@ -400,6 +400,22 @@
 <div id="toast" class="hidden">—</div>
 
 <script>
+// ── Global error trap — shows errors on screen so mobile can see them ──
+window.onerror = function(msg, src, line, col, err) {
+  const div = document.createElement('div');
+  div.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#ff2255;color:#fff;' +
+    'font:12px monospace;padding:8px;z-index:9999;word-break:break-all;';
+  div.textContent = `ERR L${line}: ${msg}`;
+  document.body.appendChild(div);
+  return false;
+};
+window.onunhandledrejection = function(e) {
+  const div = document.createElement('div');
+  div.style.cssText = 'position:fixed;top:40px;left:0;right:0;background:#ff6600;color:#fff;' +
+    'font:12px monospace;padding:8px;z-index:9999;word-break:break-all;';
+  div.textContent = 'PROMISE: ' + (e.reason?.message || e.reason);
+  document.body.appendChild(div);
+};
 // ════════════════════════════════════════════════════════════════════
 //  θ WAVE v2.0 — Twitch Paradigm
 //  T1 tap → RT captured → weights QUEST
@@ -896,8 +912,8 @@ let preItemsTarget= 0;
 
 function countdown(n, cb) {
   if (n <= 0) { cb(); return; }
+  if (!ctx) { console.error('countdown: ctx null at n='+n); cb(); return; }
   drawBg();
-  if (!ctx) return;
   const W=canvas.width/devicePixelRatio, H=canvas.height/devicePixelRatio;
   ctx.fillStyle=T1_COLOR; ctx.font='bold 72px Arial';
   ctx.textAlign='center'; ctx.textBaseline='middle';
@@ -961,8 +977,12 @@ function startSession() {
   probeHits={}; probeMisses={}; probeContrasts={};
   t1RTs=[]; medianT1RT=300;
 
+  // Show task screen FIRST so canvas is visible and getContext works
+  showScreen('task-screen');
+
   canvas = document.getElementById('task-canvas');
   ctx    = canvas.getContext('2d');
+  if (!ctx) { console.error('Canvas context null!'); return; }
   function resizeCanvas() {
     canvas.width  = window.innerWidth  * devicePixelRatio;
     canvas.height = window.innerHeight * devicePixelRatio;
@@ -996,8 +1016,7 @@ function startSession() {
   // EIG trials assigned lazily in finishTrial() — nothing to pre-compute here
 
   document.getElementById('tap-overlay').style.display = 'block';
-  showScreen('task-screen');
-  countdown(3, () => { sessionActive = true; startTrial(); });
+  countdown(3, () => { console.log('countdown done, starting trial'); sessionActive = true; startTrial(); });
 }
 
 function abortSession() {
@@ -1013,6 +1032,7 @@ function abortSession() {
 //  Phases: pre → t1 → mask_t1 → lag → t2 → mask_t2 → runout → done
 // ════════════════════════════════════════════════════════════════════
 function startTrial() {
+  console.log('startTrial', currentTrial, 'soa='+trials[currentTrial]?.soa_ms, 'c='+trials[currentTrial]?.contrast_pct);
   if (!sessionActive || currentTrial >= TOTAL_TRIALS) { endSession(); return; }
 
   const trial = trials[currentTrial];
@@ -1060,6 +1080,7 @@ function startTrial() {
 
   currentItem = { char: pickLetter(), color: DIST_COLOR, role: 'dist' };
   if (animFrame) cancelAnimationFrame(animFrame);
+  console.log('RAF scheduled, phase='+phase);
   animFrame = requestAnimationFrame(streamLoop);
 }
 
