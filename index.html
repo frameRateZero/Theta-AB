@@ -91,18 +91,15 @@
   .hud-conf-fill{height:100%;border-radius:2px;
     background:linear-gradient(90deg,var(--danger),var(--warning),var(--success));width:0%;}
 
-  /* TAP BUTTON — single large target */
-  .tap-zone{position:fixed;bottom:0;left:0;right:0;display:none;
-    height:120px;z-index:25;align-items:center;justify-content:center;padding:12px 16px;
-    background:linear-gradient(transparent,rgba(8,8,15,0.85));}
-  .tap-btn{width:100%;max-width:420px;height:88px;border-radius:16px;
-    border:1px solid rgba(0,229,255,0.14);background:rgba(0,229,255,0.03);
-    color:rgba(0,229,255,0.4);font-family:var(--font-display);font-size:14px;
-    font-weight:700;letter-spacing:3px;text-transform:uppercase;
-    cursor:pointer;transition:background 0.08s,border-color 0.08s;
-    touch-action:manipulation;-webkit-tap-highlight-color:transparent;user-select:none;
-    display:flex;align-items:center;justify-content:center;}
-  .tap-btn.tapped{background:rgba(0,229,255,0.09);border-color:rgba(0,229,255,0.28);}
+  /* FULLSCREEN TAP OVERLAY — sits above canvas, catches all touches */
+  #tap-overlay{position:fixed;inset:0;z-index:25;display:none;
+    -webkit-tap-highlight-color:transparent;touch-action:manipulation;
+    cursor:none;user-select:none;}
+  /* Subtle bottom-of-screen tap indicator */
+  #tap-indicator{position:fixed;bottom:0;left:0;right:0;height:5px;
+    background:rgba(0,229,255,0.0);z-index:26;pointer-events:none;
+    transition:background 0.08s;}
+  #tap-indicator.tapped{background:rgba(0,229,255,0.35);}
 
   /* RESULTS */
   #results-screen{gap:18px;overflow-y:auto;padding:44px 24px 64px;justify-content:flex-start;}
@@ -223,22 +220,6 @@
       <input type="range" class="setting-slider" id="sl-t1font" min="48" max="108" step="8" value="96" oninput="updateSettings()">
     </div>
 
-    <div class="setting-row">
-      <div class="setting-label">
-        <span class="setting-name">T2 Contrast (start)</span>
-        <span class="setting-val" id="lbl-t2contrast">—</span>
-      </div>
-      <input type="range" class="setting-slider" id="sl-t2contrast" min="2" max="60" step="2" value="20" oninput="updateSettings()">
-    </div>
-
-    <div class="setting-row">
-      <div class="setting-label">
-        <span class="setting-name">Contrast Range</span>
-        <span class="setting-val" id="lbl-contrast-range">—</span>
-      </div>
-      <input type="range" class="setting-slider" id="sl-contrast-range" min="10" max="50" step="5" value="30" oninput="updateSettings()">
-    </div>
-
     <div class="settings-divider"></div>
 
     <div class="setting-row">
@@ -246,7 +227,7 @@
         <span class="setting-name">SOA Max</span>
         <span class="setting-val" id="lbl-soamax">—</span>
       </div>
-      <input type="range" class="setting-slider" id="sl-soamax" min="200" max="600" step="50" value="600" oninput="updateSettings()">
+      <input type="range" class="setting-slider" id="sl-soamax" min="400" max="1200" step="50" value="800" oninput="updateSettings()">
     </div>
 
     <div class="setting-row">
@@ -254,15 +235,17 @@
         <span class="setting-name">Trials</span>
         <span class="setting-val" id="lbl-trials">—</span>
       </div>
-      <input type="range" class="setting-slider" id="sl-trials" min="20" max="200" step="10" value="120" oninput="updateSettings()">
+      <input type="range" class="setting-slider" id="sl-trials" min="40" max="300" step="10" value="120" oninput="updateSettings()">
     </div>
 
+    <div class="settings-divider"></div>
+
     <div class="setting-row">
-      <div class="setting-label">
-        <span class="setting-name">T1 Response Window</span>
-        <span class="setting-val" id="lbl-t1win">—</span>
+      <div class="setting-label" style="justify-content:flex-start;gap:10px;">
+        <input type="checkbox" id="chk-mask" onchange="updateSettings()" style="accent-color:var(--theta);width:16px;height:16px;cursor:pointer;">
+        <span class="setting-name">Line Mask</span>
+        <span class="setting-val" style="font-size:9px;color:var(--muted);margin-left:auto;">may cue T2</span>
       </div>
-      <input type="range" class="setting-slider" id="sl-t1win" min="200" max="700" step="50" value="500" oninput="updateSettings()">
     </div>
 
   </div>
@@ -339,10 +322,9 @@
       <div class="hud-val" id="hud-contrast">—</div>
     </div>
   </div>
-  <!-- Single tap button -->
-  <div class="tap-zone" id="tap-zone">
-    <button class="tap-btn" id="btn-tap" onpointerdown="handleTap()">TAP</button>
-  </div>
+  <!-- Fullscreen tap overlay — above canvas, below abort button -->
+  <div id="tap-overlay"></div>
+  <div id="tap-indicator"></div>
   <button class="btn-secondary" style="position:fixed;top:12px;right:12px;z-index:30;
     padding:6px 12px;font-size:9px;opacity:0.4;" onclick="abortSession()">✕</button>
 </div>
@@ -475,186 +457,316 @@ function calibrate() {
 // Handled by showScreen() hook below
 
 // ════════════════════════════════════════════════════════════════════
-//  QUEST+ — Phase-reset Damped Sine Likelihood Model (unchanged from v1.x)
+//  QUEST — Contrast-Threshold Damped Sine Surface Model
+//
+//  We measure the CONTRAST THRESHOLD at each SOA — the minimum contrast
+//  needed to detect T2. This threshold oscillates as a damped sine:
+//
+//    threshold(SOA) = base + A * sin(2π * f * SOA/1000) * exp(-SOA/τ)
+//
+//  Convention:
+//    base  = resting threshold (low contrast, easy — e.g. 5–15%)
+//    A     = blink amplitude in contrast % (how much harder at trough)
+//    trough peaks (sin=+1): threshold = base+A  (HIGH contrast needed)
+//    recovery valleys (sin=-1): threshold ≈ base (LOW contrast, easy)
+//
+//  First trough ~1/(4f), second ~5/(4f), third ~9/(4f).
+//  τ controls damping — free parameter so we can find 2nd/3rd troughs.
+//
+//  Detection likelihood uses a logistic psychometric function:
+//    p(detect | SOA, contrast) = 1 / (1 + exp(-(contrast - threshold) / σ))
+//  σ fixed at SIGMA_C (contrast JND slope, ~8%).
+//
+//  EIG jointly selects (SOA, contrast) each trial — no separate staircase.
 // ════════════════════════════════════════════════════════════════════
 const QUEST = (() => {
-  const TAU = 250;
-  const nF = 20;
-  const fGrid = Array.from({length:nF}, (_,i) => 3.0 + i * 4.0 / (nF - 1));
-  const ampGrid = [0.30, 0.39, 0.48, 0.57, 0.66, 0.75];
-  const baseGrid = [0.88, 0.93, 0.97];
-  const nA = ampGrid.length, nB = baseGrid.length;
-  const N  = nF * nA * nB;
+  // ── Fixed slope of psychometric function (contrast %) ────────────
+  const SIGMA_C = 8.0;
+
+  // ── Parameter grids ──────────────────────────────────────────────
+  const nF   = 20;
+  const fGrid = Array.from({length:nF}, (_,i) => 3.0 + i*(5.0/(nF-1)));  // 3–8 Hz
+
+  // Amplitude: how deep the blink is in contrast % units
+  // First trough threshold = base + A
+  const ampGrid  = [5, 10, 18, 28, 40, 55];   // contrast %
+  const nA       = ampGrid.length;
+
+  // Base threshold: resting contrast needed outside blink
+  const baseGrid = [3, 6, 10, 16, 24];         // contrast %
+  const nB       = baseGrid.length;
+
+  // Tau: decay time constant — free so 2nd/3rd troughs can emerge
+  const tauGrid  = [150, 250, 400, 600, 900];  // ms
+  const nT       = tauGrid.length;
+
+  const N = nF * nA * nB * nT;
   let logPost = new Float64Array(N).fill(-Math.log(N));
-  function idx(fi, ai, bi) { return fi*(nA*nB) + ai*nB + bi; }
-  function pDet(soa_ms, fi, ai, bi) {
-    if (soa_ms <= 0) return baseGrid[bi];
-    const f=fGrid[fi], A=ampGrid[ai], base=baseGrid[bi];
+
+  function idx(fi, ai, bi, ti) {
+    return fi*(nA*nB*nT) + ai*(nB*nT) + bi*nT + ti;
+  }
+
+  // Threshold contrast at given SOA for parameter combination
+  function threshold(soa_ms, fi, ai, bi, ti) {
+    const f    = fGrid[fi];
+    const A    = ampGrid[ai];
+    const base = baseGrid[bi];
+    const tau  = tauGrid[ti];
     const sine = Math.sin(2 * Math.PI * f * soa_ms / 1000);
-    const env  = Math.exp(-soa_ms / TAU);
-    return Math.max(0.02, Math.min(0.98, base - A * sine * env));
+    const env  = Math.exp(-soa_ms / tau);
+    // Clamp so threshold stays in [1%, 99%]
+    return Math.max(1, Math.min(99, base + A * sine * env));
   }
+
+  // p(detect) via logistic psychometric function
+  function pDet(soa_ms, contrast_pct, fi, ai, bi, ti) {
+    const thr = threshold(soa_ms, fi, ai, bi, ti);
+    return 1 / (1 + Math.exp(-(contrast_pct - thr) / SIGMA_C));
+  }
+
+  // Log-sum-exp for numerical stability
   function lae(a, b) {
-    if (a === -Infinity) return b; if (b === -Infinity) return a;
-    return a > b ? a + Math.log(1 + Math.exp(b-a)) : b + Math.log(1 + Math.exp(a-b));
+    if (a === -Infinity) return b;
+    if (b === -Infinity) return a;
+    return a > b ? a + Math.log(1 + Math.exp(b-a))
+                 : b + Math.log(1 + Math.exp(a-b));
   }
-  function update(detected, soa_ms, weight=1.0) {
+
+  // ── Posterior update ─────────────────────────────────────────────
+  // Now takes contrast_pct as well as detected + soa
+  function update(detected, soa_ms, contrast_pct, weight=1.0) {
     const lp = new Float64Array(N);
-    for (let fi=0;fi<nF;fi++) for (let ai=0;ai<nA;ai++) for (let bi=0;bi<nB;bi++) {
-      const p  = pDet(soa_ms, fi, ai, bi);
-      const ll = detected ? Math.log(p) : Math.log(1-p);
-      lp[idx(fi,ai,bi)] = logPost[idx(fi,ai,bi)] + weight * ll;
-    }
-    let mx = -Infinity; lp.forEach(v => { if(v>mx) mx=v; });
-    let s  = 0;         lp.forEach(v => s += Math.exp(v-mx));
+    for (let fi=0;fi<nF;fi++)
+      for (let ai=0;ai<nA;ai++)
+        for (let bi=0;bi<nB;bi++)
+          for (let ti=0;ti<nT;ti++) {
+            const p  = pDet(soa_ms, contrast_pct, fi, ai, bi, ti);
+            const ll = detected ? Math.log(Math.max(1e-9,p))
+                                : Math.log(Math.max(1e-9,1-p));
+            lp[idx(fi,ai,bi,ti)] = logPost[idx(fi,ai,bi,ti)] + weight * ll;
+          }
+    // Normalise in log space
+    let mx = -Infinity;
+    lp.forEach(v => { if(v>mx) mx=v; });
+    let s = 0;
+    lp.forEach(v => s += Math.exp(v-mx));
     const lz = mx + Math.log(s);
     for (let i=0;i<N;i++) logPost[i] = lp[i] - lz;
   }
+
+  // ── Marginal posteriors ───────────────────────────────────────────
   function freqPost() {
     const post = new Float64Array(nF);
     for (let fi=0;fi<nF;fi++) {
       let s = -Infinity;
-      for (let ai=0;ai<nA;ai++) for (let bi=0;bi<nB;bi++)
-        s = lae(s, logPost[idx(fi,ai,bi)]);
+      for (let ai=0;ai<nA;ai++)
+        for (let bi=0;bi<nB;bi++)
+          for (let ti=0;ti<nT;ti++)
+            s = lae(s, logPost[idx(fi,ai,bi,ti)]);
       post[fi] = Math.exp(s);
     }
     const tot = post.reduce((a,b)=>a+b,0);
     return post.map(v=>v/tot);
   }
-  function meanFreq() { const p=freqPost(); return p.reduce((m,v,i)=>m+v*fGrid[i],0); }
-  function mapFreq()  { const p=freqPost(); let b=0,bv=0; p.forEach((v,i)=>{if(v>bv){bv=v;b=i;}}); return fGrid[b]; }
+
+  function tauPost() {
+    const post = new Float64Array(nT);
+    for (let ti=0;ti<nT;ti++) {
+      let s = -Infinity;
+      for (let fi=0;fi<nF;fi++)
+        for (let ai=0;ai<nA;ai++)
+          for (let bi=0;bi<nB;bi++)
+            s = lae(s, logPost[idx(fi,ai,bi,ti)]);
+      post[ti] = Math.exp(s);
+    }
+    const tot = post.reduce((a,b)=>a+b,0);
+    return post.map(v=>v/tot);
+  }
+
+  function meanFreq()  { const p=freqPost(); return p.reduce((m,v,i)=>m+v*fGrid[i],0); }
+  function mapFreq()   { const p=freqPost(); let b=0,bv=0; p.forEach((v,i)=>{if(v>bv){bv=v;b=i;}}); return fGrid[b]; }
+  function meanTau()   { const p=tauPost();  return p.reduce((m,v,i)=>m+v*tauGrid[i],0); }
+
+  function meanParam(grid, margFn) {
+    const p = margFn();
+    return p.reduce((m,v,i)=>m+v*grid[i],0);
+  }
   function meanAmp()  {
     const post=new Float64Array(nA);
-    for(let ai=0;ai<nA;ai++){let s=-Infinity;for(let fi=0;fi<nF;fi++)for(let bi=0;bi<nB;bi++)s=lae(s,logPost[idx(fi,ai,bi)]);post[ai]=Math.exp(s);}
-    const tot=post.reduce((a,b)=>a+b,0); return post.map(v=>v/tot).reduce((m,v,i)=>m+v*ampGrid[i],0);
+    for(let ai=0;ai<nA;ai++){
+      let s=-Infinity;
+      for(let fi=0;fi<nF;fi++) for(let bi=0;bi<nB;bi++) for(let ti=0;ti<nT;ti++)
+        s=lae(s,logPost[idx(fi,ai,bi,ti)]);
+      post[ai]=Math.exp(s);
+    }
+    const tot=post.reduce((a,b)=>a+b,0);
+    return post.map(v=>v/tot).reduce((m,v,i)=>m+v*ampGrid[i],0);
   }
   function meanBase() {
     const post=new Float64Array(nB);
-    for(let bi=0;bi<nB;bi++){let s=-Infinity;for(let fi=0;fi<nF;fi++)for(let ai=0;ai<nA;ai++)s=lae(s,logPost[idx(fi,ai,bi)]);post[bi]=Math.exp(s);}
-    const tot=post.reduce((a,b)=>a+b,0); return post.map(v=>v/tot).reduce((m,v,i)=>m+v*baseGrid[i],0);
+    for(let bi=0;bi<nB;bi++){
+      let s=-Infinity;
+      for(let fi=0;fi<nF;fi++) for(let ai=0;ai<nA;ai++) for(let ti=0;ti<nT;ti++)
+        s=lae(s,logPost[idx(fi,ai,bi,ti)]);
+      post[bi]=Math.exp(s);
+    }
+    const tot=post.reduce((a,b)=>a+b,0);
+    return post.map(v=>v/tot).reduce((m,v,i)=>m+v*baseGrid[i],0);
   }
+
+  // ── Posterior-averaged threshold curve ───────────────────────────
+  // Returns expected threshold contrast at a given SOA
+  function meanThreshold(soa_ms) {
+    let thr = 0;
+    for(let fi=0;fi<nF;fi++)
+      for(let ai=0;ai<nA;ai++)
+        for(let bi=0;bi<nB;bi++)
+          for(let ti=0;ti<nT;ti++)
+            thr += Math.exp(logPost[idx(fi,ai,bi,ti)]) * threshold(soa_ms,fi,ai,bi,ti);
+    return thr;
+  }
+
+  // ── Confidence: entropy over frequency marginal ───────────────────
   function confidence() {
     const p=freqPost(), maxH=Math.log(nF); let H=0;
-    p.forEach(v=>{if(v>1e-12)H-=v*Math.log(v);}); return Math.max(0,Math.min(1,1-H/maxH));
+    p.forEach(v=>{if(v>1e-12)H-=v*Math.log(v);});
+    return Math.max(0,Math.min(1,1-H/maxH));
   }
-  function predictP(soa_ms) {
+
+  // ── Trough locations from posterior mean parameters ───────────────
+  // Returns array of {n, soa_ms, threshold_pct} for troughs 1,2,3
+  function troughs() {
+    const f   = meanFreq();
+    const tau = meanTau();
+    const A   = meanAmp();
+    const base= meanBase();
+    const results = [];
+    // nth trough at SOA = (4n-3)/(4f) seconds, n=1,2,3
+    for (let n=1; n<=3; n++) {
+      const soa_ms = (4*n-3) * 1000 / (4*f);
+      const env    = Math.exp(-soa_ms/tau);
+      const thr    = base + A * env; // sin=1 at trough
+      results.push({ n, soa_ms: Math.round(soa_ms), threshold_pct: Math.round(thr) });
+    }
+    return results;
+  }
+
+  // ── Posterior-predictive p(detect) at given SOA+contrast ─────────
+  function predictP(soa_ms, contrast_pct) {
     let p=0;
-    for(let fi=0;fi<nF;fi++)for(let ai=0;ai<nA;ai++)for(let bi=0;bi<nB;bi++)
-      p+=Math.exp(logPost[idx(fi,ai,bi)])*pDet(soa_ms,fi,ai,bi);
+    for(let fi=0;fi<nF;fi++)
+      for(let ai=0;ai<nA;ai++)
+        for(let bi=0;bi<nB;bi++)
+          for(let ti=0;ti<nT;ti++)
+            p+=Math.exp(logPost[idx(fi,ai,bi,ti)])*pDet(soa_ms,contrast_pct,fi,ai,bi,ti);
     return p;
   }
-  function freqEntropy() { const fp=freqPost();let h=0;fp.forEach(p=>{if(p>1e-12)h-=p*Math.log(p);});return h; }
-  function freqPostGiven(soa_ms, resp) {
-    const fp=new Float64Array(nF);
-    for(let fi=0;fi<nF;fi++){let w=0;for(let ai=0;ai<nA;ai++)for(let bi=0;bi<nB;bi++){const prior=Math.exp(logPost[idx(fi,ai,bi)]);const pd=pDet(soa_ms,fi,ai,bi);w+=prior*(resp?pd:1-pd);}fp[fi]=w;}
-    const tot=fp.reduce((a,b)=>a+b,0);if(tot>0)for(let i=0;i<nF;i++)fp[i]/=tot;return fp;
+
+  // ── EIG: jointly select best (SOA, contrast) candidate ───────────
+  function entropy(dist) {
+    let h=0; dist.forEach(p=>{if(p>1e-12)h-=p*Math.log(p);}); return h;
   }
-  function entropy(dist){let h=0;dist.forEach(p=>{if(p>1e-12)h-=p*Math.log(p);});return h;}
-  function nextSOA(candidates) {
-    const hC=freqEntropy();let best=candidates[0],bestEIG=-Infinity;
-    candidates.forEach(s=>{
-      const pY=predictP(s),pN=1-pY;
-      const eig=hC-(pY*entropy(freqPostGiven(s,1))+pN*entropy(freqPostGiven(s,0)));
-      if(eig>bestEIG){bestEIG=eig;best=s;}
+
+  function freqEntropy() { return entropy(freqPost()); }
+
+  // Marginal freq posterior after observing (soa, contrast, resp)
+  function freqPostGiven(soa_ms, contrast_pct, resp) {
+    const fp = new Float64Array(nF);
+    for(let fi=0;fi<nF;fi++){
+      let w=0;
+      for(let ai=0;ai<nA;ai++)
+        for(let bi=0;bi<nB;bi++)
+          for(let ti=0;ti<nT;ti++){
+            const prior = Math.exp(logPost[idx(fi,ai,bi,ti)]);
+            const pd    = pDet(soa_ms, contrast_pct, fi, ai, bi, ti);
+            w += prior * (resp ? pd : 1-pd);
+          }
+      fp[fi]=w;
+    }
+    const tot=fp.reduce((a,b)=>a+b,0);
+    if(tot>0) for(let i=0;i<nF;i++) fp[i]/=tot;
+    return fp;
+  }
+
+  // candidates: array of {soa_ms, contrast_pct}
+  function nextStim(candidates) {
+    const hC = freqEntropy();
+    let best = candidates[0], bestEIG = -Infinity;
+    candidates.forEach(c => {
+      const pY  = predictP(c.soa_ms, c.contrast_pct);
+      const pN  = 1 - pY;
+      const eig = hC - (pY*entropy(freqPostGiven(c.soa_ms,c.contrast_pct,1))
+                      + pN*entropy(freqPostGiven(c.soa_ms,c.contrast_pct,0)));
+      if(eig > bestEIG){ bestEIG=eig; best=c; }
     });
     return best;
   }
+
   function reset() { logPost = new Float64Array(N).fill(-Math.log(N)); }
-  function meanTroughMs() { return 500 / meanFreq(); }
-  function mapTroughMs()  { return 500 / mapFreq();  }
-  return { update, predictP, nextSOA, reset, freqPost, fGrid, nF,
-           meanFreq, mapFreq, meanAmp, meanBase, meanTroughMs, mapTroughMs, confidence, TAU };
+
+  // Legacy shim — SOA-only next (used during warm-up)
+  function nextSOA(soaCands) {
+    // Pick contrast at current posterior mean threshold for that SOA
+    // so warm-up trials still land near the psychometric midpoint
+    const c = soaCands[Math.floor(Math.random()*soaCands.length)];
+    return c;
+  }
+
+  return {
+    update, predictP, nextStim, nextSOA, reset,
+    freqPost, tauPost, fGrid, tauGrid, nF, nT,
+    meanFreq, mapFreq, meanTau, meanAmp, meanBase, meanThreshold,
+    troughs, confidence, SIGMA_C
+  };
 })();
 
 // ════════════════════════════════════════════════════════════════════
-//  PER-SOA-BIN CONTRAST STAIRCASE
-//  SOA range 50-600ms split into 6 bins.
-//  Each bin runs an independent 1-up-2-down staircase targeting 70.7%.
-//  Step size: 0.5 contrast stops, halving after first reversal.
+//  CANDIDATE GRID — (SOA × contrast) pairs for EIG selection
+//  Built once per session after calibration, updated if CFG changes.
 // ════════════════════════════════════════════════════════════════════
-const CONTRAST_BINS = [
-  {lo:50,  hi:120, label:'50–120ms'},
-  {lo:120, hi:200, label:'120–200ms'},
-  {lo:200, hi:280, label:'200–280ms'},
-  {lo:280, hi:380, label:'280–380ms'},
-  {lo:380, hi:500, label:'380–500ms'},
-  {lo:500, hi:650, label:'500–650ms'},
-];
+let stimCandidates = [];  // [{soa_ms, contrast_pct}, ...]
 
-function makeBinStaircase(startContrast) {
-  return {
-    contrast:    startContrast, // current contrast pct 0-100
-    step:        8,             // contrast % step (halves after first reversal)
-    lastDir:     0,             // +1 up, -1 down
-    reversals:   0,
-    streak:      0,             // consecutive hits (need 2 for step down)
-    history:     [],            // {contrast, detected}
-  };
-}
+function buildStimCandidates(mspf) {
+  const minFrames = Math.ceil(50  / mspf);
+  const maxFrames = Math.ceil(CFG.soaMaxMs / mspf);
+  const soaCands  = [];
+  for(let f=minFrames; f<=maxFrames; f++) soaCands.push(Math.round(f*mspf));
+  const uniqueSOAs = [...new Set(soaCands)];
 
-const BIN_STAIRCASES = {};
-
-function getBin(soa_ms) {
-  return CONTRAST_BINS.findIndex(b => soa_ms >= b.lo && soa_ms < b.hi);
-}
-
-function getBinContrast(soa_ms) {
-  const bi = getBin(soa_ms);
-  if (bi < 0) return CFG.t2ContrastStart;
-  if (!BIN_STAIRCASES[bi]) BIN_STAIRCASES[bi] = makeBinStaircase(CFG.t2ContrastStart);
-  return BIN_STAIRCASES[bi].contrast;
-}
-
-function updateBinStaircase(soa_ms, detected) {
-  const bi = getBin(soa_ms);
-  if (bi < 0) return;
-  if (!BIN_STAIRCASES[bi]) BIN_STAIRCASES[bi] = makeBinStaircase(CFG.t2ContrastStart);
-  const s = BIN_STAIRCASES[bi];
-  const minC = CFG.t2ContrastMin, maxC = CFG.t2ContrastStart + CFG.t2ContrastRange;
-  s.history.push({contrast: s.contrast, detected});
-
-  if (detected) {
-    s.streak++;
-    if (s.streak >= 2) {
-      // 2 consecutive hits → step down (harder)
-      const dir = -1;
-      if (s.lastDir === 1) { s.reversals++; if(s.reversals===1) s.step = Math.max(2, s.step/2); }
-      s.lastDir = dir; s.streak = 0;
-      s.contrast = Math.max(minC, s.contrast - s.step);
-    }
-  } else {
-    // 1 miss → step up (easier)
-    s.streak = 0;
-    const dir = 1;
-    if (s.lastDir === -1) { s.reversals++; if(s.reversals===1) s.step = Math.max(2, s.step/2); }
-    s.lastDir = dir;
-    s.contrast = Math.min(maxC, s.contrast + s.step);
+  // Contrast levels: 5–95%, log-spaced to concentrate near low values
+  // where the interesting threshold region lives
+  const contrastLevels = [];
+  const nC = 12;
+  for(let i=0;i<nC;i++){
+    const pct = Math.round(5 * Math.pow(95/5, i/(nC-1)));
+    contrastLevels.push(Math.max(5, Math.min(95, pct)));
   }
+  const uniqueContrasts = [...new Set(contrastLevels)];
+
+  const cands = [];
+  uniqueSOAs.forEach(soa => {
+    uniqueContrasts.forEach(c => cands.push({soa_ms: soa, contrast_pct: c}));
+  });
+  return cands;
 }
 
-function contrastToHex(pct) {
-  // pct: 0=invisible (#808080), 100=max dark (#000000 but clamped)
-  const lum = Math.round(128 - (pct/100) * 128);
-  const h = Math.max(0, Math.min(255, lum)).toString(16).padStart(2,'0');
-  return '#' + h + h + h;
-}
+// Current trial's assigned stimulus (set by startTrial / finishTrial)
+let currentContrast_pct = 40;
 
-function resetBinStaircases() {
-  for (const k in BIN_STAIRCASES) delete BIN_STAIRCASES[k];
-}
+function resetStaircases() { /* no separate staircase — QUEST handles everything */ }
+// Legacy alias
+function resetBinStaircases() { resetStaircases(); }
 
 // ════════════════════════════════════════════════════════════════════
 //  SETTINGS
 // ════════════════════════════════════════════════════════════════════
 let CFG = {
-  framesPerItem:    8,     // stream speed (~67ms @ 120Hz)
-  t1FontPx:         96,
-  t2ContrastStart:  20,    // starting contrast % for each bin
-  t2ContrastRange:  30,    // max contrast range above start
-  t2ContrastMin:    2,     // floor
-  soaMaxMs:         600,
-  totalTrials:      120,
-  t1WinMs:          500,   // T1 response window (ms)
+  framesPerItem:  8,       // stream speed (~67ms @ 120Hz)
+  t1FontPx:       96,
+  soaMaxMs:       800,     // extend to 800ms to capture 2nd trough
+  totalTrials:    120,
+  maskEnabled:    false,   // line fragment mask after digits (toggle)
 };
 
 let FRAMES_PER_ITEM = CFG.framesPerItem;
@@ -677,20 +789,14 @@ function updateSettings() {
   const font = getEl('sl-t1font');
   if (font) { CFG.t1FontPx = parseInt(font.value); setLbl('lbl-t1font', CFG.t1FontPx+'px'); }
 
-  const ct = getEl('sl-t2contrast');
-  if (ct) { CFG.t2ContrastStart = parseInt(ct.value); setLbl('lbl-t2contrast', CFG.t2ContrastStart+'%'); }
-
-  const cr = getEl('sl-contrast-range');
-  if (cr) { CFG.t2ContrastRange = parseInt(cr.value); setLbl('lbl-contrast-range', '±'+CFG.t2ContrastRange+'%'); }
-
   const soa = getEl('sl-soamax');
   if (soa) { CFG.soaMaxMs = parseInt(soa.value); setLbl('lbl-soamax', CFG.soaMaxMs+'ms'); }
 
   const tr = getEl('sl-trials');
   if (tr) { CFG.totalTrials = parseInt(tr.value); setLbl('lbl-trials', CFG.totalTrials); }
 
-  const tw = getEl('sl-t1win');
-  if (tw) { CFG.t1WinMs = parseInt(tw.value); setLbl('lbl-t1win', CFG.t1WinMs+'ms'); }
+  const mask = getEl('chk-mask');
+  if (mask) { CFG.maskEnabled = mask.checked; }
 }
 
 function applySettings() {
@@ -753,7 +859,6 @@ let t1RTs           = [];  // all valid T1 RTs for sigmoid calibration
 let medianT1RT      = 300; // running median T1 RT (ms), updated each trial
 
 const DEBUG_MODE = location.search.includes('debug');
-let soaCandidates = [];
 let msPerFrame    = 1000 / 120;
 
 // Per-trial state
@@ -779,13 +884,7 @@ let runoutDone    = 0;
 let preItemsDone  = 0;
 let preItemsTarget= 0;
 
-function buildSOACandidates(mspf) {
-  const minFrames = Math.ceil(50 / mspf);
-  const maxFrames = Math.ceil(CFG.soaMaxMs / mspf);
-  const cands = [];
-  for (let f = minFrames; f <= maxFrames; f++) cands.push(Math.round(f * mspf));
-  return [...new Set(cands)];
-}
+
 
 function countdown(n, cb) {
   if (n <= 0) { cb(); return; }
@@ -810,12 +909,12 @@ function handleTap() {
   if (!sessionActive) return;
   const now = performance.now();
 
-  // Brief visual pulse
-  const btn = document.getElementById('btn-tap');
-  btn.classList.add('tapped');
-  setTimeout(() => btn.classList.remove('tapped'), 120);
+  // Brief bottom-bar flash
+  const ind = document.getElementById('tap-indicator');
+  ind.classList.add('tapped');
+  setTimeout(() => ind.classList.remove('tapped'), 100);
 
-  // First tap after T1 onset and before T1 is already recorded
+  // First tap after T1 onset
   if (t1WinOpen && !t1Tapped) {
     t1Tapped = true;
     t1RT     = now - t1Onset;
@@ -823,7 +922,7 @@ function handleTap() {
     return;
   }
 
-  // Second tap after T2 onset and before T2 is already recorded
+  // Second tap after T2 onset
   if (t2WinOpen && !t2Tapped) {
     t2Tapped = true;
     t2RT     = now - t2Onset;
@@ -866,19 +965,27 @@ function startSession() {
   resizeCanvas();
   window.addEventListener('resize', resizeCanvas);
 
-  msPerFrame    = 1000 / (measuredFPS || 120);
-  soaCandidates = buildSOACandidates(msPerFrame);
+  msPerFrame     = 1000 / (measuredFPS || 120);
+  stimCandidates = buildStimCandidates(msPerFrame);
 
-  // Pre-assign SOAs for all trials
+  // Pre-assign stimuli for all trials
+  // Warm-up (first 15): random SOA, contrast starts at 40% (visible) and adapts
   for (let i=0; i<TOTAL_TRIALS; i++) {
-    const soa = i < 10
-      ? soaCandidates[Math.floor(Math.random()*soaCandidates.length)]
-      : QUEST.nextSOA(soaCandidates);
-    trials.push({ soa_ms: soa, detected: null, t1RT: null, t2RT: null,
+    let stim;
+    if (i < 15) {
+      // Random SOA, moderate contrast so participant can find the task
+      const soaList = [...new Set(stimCandidates.map(c=>c.soa_ms))];
+      const soa     = soaList[Math.floor(Math.random()*soaList.length)];
+      stim = { soa_ms: soa, contrast_pct: 40 };
+    } else {
+      stim = QUEST.nextStim(stimCandidates);
+    }
+    trials.push({ soa_ms: stim.soa_ms, contrast_pct: stim.contrast_pct,
+                  detected: null, t1RT: null, t2RT: null,
                   t2Contrast: null, t1Tapped: false });
   }
 
-  document.getElementById('tap-zone').style.display = 'flex';
+  document.getElementById('tap-overlay').style.display = 'block';
   showScreen('task-screen');
   countdown(3, () => { sessionActive = true; startTrial(); });
 }
@@ -887,7 +994,7 @@ function abortSession() {
   sessionActive = false;
   if (animFrame) cancelAnimationFrame(animFrame);
   clearTimeout(t1WinTimeout);
-  document.getElementById('tap-zone').style.display = 'none';
+  document.getElementById('tap-overlay').style.display = 'none';
   showScreen('home-screen');
 }
 
@@ -918,10 +1025,10 @@ function startTrial() {
   phase     = 'pre';
   phaseFrame= 0;
 
-  // Pick T2 contrast for this trial's SOA bin
-  const contrastPct  = getBinContrast(currentSOA_ms);
-  currentT2Color     = contrastToHex(contrastPct);
-  trial.t2Contrast   = contrastPct;
+  // Get contrast assigned by QUEST for this trial
+  currentContrast_pct = trial.contrast_pct !== undefined ? trial.contrast_pct : 40;
+  currentT2Color      = contrastToHex(currentContrast_pct);
+  trial.t2Contrast    = currentContrast_pct;
 
   // Pick T1 digit (1-4) and T2 digit (6-9)
   const t1Char = T1_POOL[Math.floor(Math.random() * T1_POOL.length)];
@@ -931,7 +1038,7 @@ function startTrial() {
 
   // Reset windows — close any stale windows from previous trial
   t1WinOpen = false; t2WinOpen = false;
-  document.getElementById('btn-tap').classList.remove('tapped');
+  document.getElementById('tap-indicator').classList.remove('tapped');
   document.getElementById('hud-contrast').textContent = contrastPct.toFixed(0) + '%';
 
   currentItem = { char: pickLetter(), color: DIST_COLOR, role: 'dist' };
@@ -982,8 +1089,10 @@ function streamLoop() {
 
     case 'mask_t1': {
       drawBg();
-      const W1 = canvas.width/devicePixelRatio, H1 = canvas.height/devicePixelRatio;
-      drawLineMask(ctx, W1/2, H1/2);
+      if (CFG.maskEnabled) {
+        const W1 = canvas.width/devicePixelRatio, H1 = canvas.height/devicePixelRatio;
+        drawLineMask(ctx, W1/2, H1/2);
+      }
       maskFrame = false;
       phase = lagItems > 0 ? 'lag' : 't2';
       phaseFrame = 0;
@@ -1020,8 +1129,10 @@ function streamLoop() {
 
     case 'mask_t2': {
       drawBg();
-      const W2 = canvas.width/devicePixelRatio, H2 = canvas.height/devicePixelRatio;
-      drawLineMask(ctx, W2/2, H2/2);
+      if (CFG.maskEnabled) {
+        const W2 = canvas.width/devicePixelRatio, H2 = canvas.height/devicePixelRatio;
+        drawLineMask(ctx, W2/2, H2/2);
+      }
       maskFrame = false;
       phase = 'runout'; phaseFrame = 0;
       currentItem = { char: pickLetter(), color: DIST_COLOR, role: 'dist' };
@@ -1119,21 +1230,23 @@ function finishTrial() {
       ? 0.5 + 0.45 * (1 / (1 + Math.exp((t1RT - medianT1RT) / (medianT1RT * 0.4))))
       : 0.7;
 
-    // Update contrast staircase
-    updateBinStaircase(soa, detected);
+    // Feed QUEST: (detected, soa, contrast, weight)
+    QUEST.update(detected ? 1 : 0, soa, trial.t2Contrast, t1Weight);
 
     // Track for chart
-    if (!probeHits[soa])     { probeHits[soa]=0; probeMisses[soa]=0; probeContrasts[soa]=[]; }
+    if (!probeHits[soa])   { probeHits[soa]=0; probeMisses[soa]=0; probeContrasts[soa]=[]; }
     if (detected) probeHits[soa]++; else probeMisses[soa]++;
     probeContrasts[soa].push(trial.t2Contrast);
 
-    // Feed QUEST weighted by T1 RT
-    QUEST.update(detected ? 1 : 0, soa, t1Weight);
-
-    // Pre-assign next trial SOA
+    // Pre-assign next trial stimulus via EIG (after warm-up)
     const ni = currentTrial + 1;
-    if (ni < TOTAL_TRIALS && trials[ni] && trials[ni].soa_ms === null)
-      trials[ni].soa_ms = QUEST.nextSOA(soaCandidates);
+    if (ni < TOTAL_TRIALS && trials[ni] && trials[ni].soa_ms !== null) {
+      if (ni >= 15) {
+        const stim = QUEST.nextStim(stimCandidates);
+        trials[ni].soa_ms       = stim.soa_ms;
+        trials[ni].contrast_pct = stim.contrast_pct;
+      }
+    }
   }
 
   currentTrial++;
@@ -1178,35 +1291,29 @@ function endSession() {
   sessionActive = false;
   if (animFrame) cancelAnimationFrame(animFrame);
   window.removeEventListener('resize', ()=>{});
-  document.getElementById('tap-zone').style.display = 'none';
+  document.getElementById('tap-overlay').style.display = 'none';
 
-  const thetaHz  = QUEST.meanFreq();
-  const thetaMAP = QUEST.mapFreq();
-  const troughMs = QUEST.meanTroughMs();
-  const ampVal   = QUEST.meanAmp();
-  const baseP    = QUEST.meanBase();
-  const basePct  = (baseP*100).toFixed(1);
+  const thetaHz   = QUEST.meanFreq();
+  const thetaMAP  = QUEST.mapFreq();
+  const tauMs     = QUEST.meanTau();
+  const ampVal    = QUEST.meanAmp();    // contrast % amplitude
+  const baseC     = QUEST.meanBase();   // baseline threshold contrast %
+  const troughData= QUEST.troughs();   // [{n, soa_ms, threshold_pct}, ...]
+  const trough1   = troughData[0];
+  const trough2   = troughData[1];
+  const trough3   = troughData[2];
 
-  let minP = baseP;
-  Object.keys(probeHits).forEach(s => {
-    const t = (probeHits[s]||0)+(probeMisses[s]||0);
-    if(t>=3){ const p=probeHits[s]/t; if(p<minP) minP=p; }
-  });
-  const blinkDepth = ((baseP-minP)*100).toFixed(0);
-
-  const sparingMs  = Math.round(250 / thetaHz);
-  const recoveryMs = Math.round(1000 / thetaHz);
-  const conf       = QUEST.confidence();
-  const confPct    = (conf*100).toFixed(0);
-  const confLabel  = conf<0.3?'Low':conf<0.55?'Moderate':conf<0.78?'Good':'High';
-  const confColor  = conf<0.3?'var(--danger)':conf<0.55?'var(--warning)':conf<0.78?'var(--theta)':'var(--success)';
+  const conf      = QUEST.confidence();
+  const confPct   = (conf*100).toFixed(0);
+  const confLabel = conf<0.3?'Low':conf<0.55?'Moderate':conf<0.78?'Good':'High';
+  const confColor = conf<0.3?'var(--danger)':conf<0.55?'var(--warning)':conf<0.78?'var(--theta)':'var(--success)';
 
   document.getElementById('res-hz').textContent      = thetaHz.toFixed(2);
   document.getElementById('res-unit').textContent    = `Hz  ·  MAP ${thetaMAP.toFixed(2)} Hz`;
-  document.getElementById('res-period').textContent  = Math.round(troughMs) + ' ms';
-  document.getElementById('res-depth').textContent   = blinkDepth + '%';
-  document.getElementById('res-baseline').textContent= basePct + '% (prior)';
-  document.getElementById('res-tau').textContent     = `A=${ampVal.toFixed(2)}`;
+  document.getElementById('res-period').textContent  = `${trough1.soa_ms} ms  ·  τ=${Math.round(tauMs)} ms`;
+  document.getElementById('res-depth').textContent   = `${trough1.threshold_pct}% / ${trough2.threshold_pct}% / ${trough3.threshold_pct}%`;
+  document.getElementById('res-baseline').textContent= `${baseC.toFixed(1)}% contrast`;
+  document.getElementById('res-tau').textContent     = `A=${ampVal.toFixed(1)}%`;
   document.getElementById('conf-bar').style.width    = confPct + '%';
   document.getElementById('conf-label').textContent  = `${confLabel} · ${confPct}%`;
   document.getElementById('conf-label').style.color  = confColor;
@@ -1215,25 +1322,35 @@ function endSession() {
   const discarded   = trials.filter(t=>t.valid===false).length;
   const t1RTMean    = t1RTs.length ? Math.round(t1RTs.reduce((a,b)=>a+b,0)/t1RTs.length) : '—';
 
-  const freqInterp = thetaHz > 6.0
-    ? 'Fast theta — short cycle, early trough. Consistent with high alertness.'
-    : thetaHz < 4.0
-    ? 'Slow theta — long cycle, late trough. May reflect elevated cognitive load or fatigue.'
-    : 'Mid-range theta — aligns with canonical AB literature (Bonnefond & Jensen 2012).';
+  const freqInterp = thetaHz > 6.5
+    ? 'Fast theta — short cycle, troughs arrive early.'
+    : thetaHz < 3.5
+    ? 'Slow theta — long cycle, deep single blink, late recovery.'
+    : 'Mid-range theta — canonical AB range (Bonnefond & Jensen 2012).';
+
+  const tauInterp = tauMs > 600
+    ? 'Long decay — 2nd and 3rd troughs likely visible.'
+    : tauMs > 300
+    ? 'Moderate decay — 2nd trough shallow but measurable.'
+    : 'Short decay — blink resolves quickly, 2nd trough near floor.';
 
   document.getElementById('blink-interp').innerHTML =
-    `Theta reset by T1 at <strong>${thetaHz.toFixed(2)} Hz</strong> (MAP: ${thetaMAP.toFixed(2)} Hz). ` +
-    `Trough ~${Math.round(troughMs)} ms, lag-1 sparing ~${sparingMs} ms, recovery ~${recoveryMs} ms. ` +
-    `Blink depth A=${ampVal.toFixed(2)} (model), ↓${blinkDepth}% (empirical). ${freqInterp}` +
-    `<br><br>Valid trials: <strong>${validTrials}</strong> / ${TOTAL_TRIALS} (${discarded} discarded — T1 not tapped). ` +
+    `<strong>${thetaHz.toFixed(2)} Hz</strong> theta (MAP: ${thetaMAP.toFixed(2)} Hz) · τ=${Math.round(tauMs)} ms decay. ` +
+    `<br>Trough thresholds — ` +
+    `T1: <strong>${trough1.threshold_pct}%</strong> contrast @ ${trough1.soa_ms} ms · ` +
+    `T2: <strong>${trough2.threshold_pct}%</strong> @ ${trough2.soa_ms} ms · ` +
+    `T3: <strong>${trough3.threshold_pct}%</strong> @ ${trough3.soa_ms} ms. ` +
+    `Baseline: ${baseC.toFixed(1)}%. Amplitude: ${ampVal.toFixed(1)}%. ` +
+    `<br>${freqInterp} ${tauInterp}` +
+    `<br><br>Valid: <strong>${validTrials}</strong>/${TOTAL_TRIALS} (${discarded} discarded). ` +
     `Mean T1 RT: <strong>${t1RTMean} ms</strong>. ` +
-    `<br>Confidence: <strong style="color:${confColor}">${confLabel} (${confPct}%)</strong>. ` +
-    `${conf<0.5?'Posterior broad — run another session.':'Posterior focused. This frequency may be your neural fingerprint.'}`;
+    `Confidence: <strong style="color:${confColor}">${confLabel} (${confPct}%)</strong>. ` +
+    `${conf<0.5?'Posterior broad — run more trials.':'Posterior focused.'}`;
 
-  drawSOAChart(baseP, troughMs);
+  drawSOAChart(baseC, trough1.soa_ms);
   drawContrastChart();
   drawFreqChart();
-  saveResult(thetaHz, thetaMAP, troughMs, ampVal, basePct, blinkDepth, confPct);
+  saveResult(thetaHz, thetaMAP, trough1.soa_ms, trough2.soa_ms, ampVal, baseC.toFixed(1), trough1.threshold_pct, trough2.threshold_pct, confPct);
   showScreen('results-screen');
 }
 
@@ -1250,103 +1367,132 @@ function drawSOAChart(baseP, troughMs) {
   ctx2.clearRect(0,0,W,H);
   const pad={l:36,r:12,t:12,b:30};
   const cW=W-pad.l-pad.r, cH=H-pad.t-pad.b;
+  // Y axis: threshold contrast % (0 at bottom = easy/low threshold, 100=hard)
   for(let i=0;i<=4;i++){
     const y=pad.t+cH*(1-i/4);
     ctx2.strokeStyle='rgba(28,28,46,1)'; ctx2.lineWidth=1;
     ctx2.beginPath();ctx2.moveTo(pad.l,y);ctx2.lineTo(pad.l+cW,y);ctx2.stroke();
     ctx2.fillStyle='rgba(90,90,122,0.65)';ctx2.font='8px Space Mono';ctx2.textAlign='right';
-    ctx2.fillText((i*25)+'%',pad.l-3,y+3);
+    ctx2.fillText((i*25)+'%c',pad.l-3,y+3);
   }
   const keys=Object.keys(probeHits).map(Number).sort((a,b)=>a-b);
   if(keys.length<2) return;
   const modelMin=50, modelMax=600, mR=modelMax-modelMin;
   const msx=s=>pad.l+(s-modelMin)/mR*cW;
   const py=p=>pad.t+cH*(1-p);
-  ctx2.strokeStyle='rgba(0,229,255,0.6)';ctx2.lineWidth=2;ctx2.setLineDash([]);
+  // Draw posterior-mean threshold curve (contrast % on Y axis)
+  ctx2.strokeStyle='rgba(0,229,255,0.7)';ctx2.lineWidth=2;ctx2.setLineDash([]);
   ctx2.beginPath();let first=true;
   for(let s=modelMin;s<=modelMax;s+=4){
-    const p=QUEST.predictP(s),x=msx(s),y=py(p);
+    const thr=QUEST.meanThreshold(s),x=msx(s),y=py(thr/100);
     first?ctx2.moveTo(x,y):ctx2.lineTo(x,y);first=false;
   }
   ctx2.stroke();
-  if(troughMs>=modelMin&&troughMs<=modelMax){
-    ctx2.strokeStyle='rgba(255,157,0,0.5)';ctx2.lineWidth=1;ctx2.setLineDash([3,3]);
-    ctx2.beginPath();ctx2.moveTo(msx(troughMs),pad.t);ctx2.lineTo(msx(troughMs),pad.t+cH);ctx2.stroke();
+  // Mark trough 1 and trough 2
+  const tr=QUEST.troughs();
+  [tr[0],tr[1]].forEach((t,i)=>{
+    if(t.soa_ms<modelMin||t.soa_ms>modelMax) return;
+    ctx2.strokeStyle=i===0?'rgba(255,157,0,0.6)":'rgba(255,60,90,0.5)';
+    ctx2.lineWidth=1;ctx2.setLineDash([3,3]);
+    ctx2.beginPath();ctx2.moveTo(msx(t.soa_ms),pad.t);ctx2.lineTo(msx(t.soa_ms),pad.t+cH);ctx2.stroke();
     ctx2.setLineDash([]);
-    ctx2.fillStyle='rgba(255,157,0,0.7)';ctx2.font='8px Space Mono';ctx2.textAlign='center';
-    ctx2.fillText('T/2',msx(troughMs),pad.t+8);
-  }
+    ctx2.fillStyle=i===0?'rgba(255,157,0,0.8)":'rgba(255,60,90,0.7)';
+    ctx2.font='8px Space Mono';ctx2.textAlign='center';
+    ctx2.fillText('T'+(i+1),msx(t.soa_ms),pad.t+8);
+  });
+  // Baseline threshold
   ctx2.strokeStyle='rgba(57,255,138,0.38)';ctx2.lineWidth=1;ctx2.setLineDash([2,4]);
-  ctx2.beginPath();ctx2.moveTo(pad.l,py(baseP));ctx2.lineTo(pad.l+cW,py(baseP));ctx2.stroke();
+  ctx2.beginPath();ctx2.moveTo(pad.l,py(baseP/100));ctx2.lineTo(pad.l+cW,py(baseP/100));ctx2.stroke();
   ctx2.setLineDash([]);
+  // Plot mean contrast used at each SOA (approximates threshold)
   keys.forEach(soa=>{
     const tot=(probeHits[soa]||0)+(probeMisses[soa]||0);
     if(!tot) return;
-    const p=probeHits[soa]/tot,x=msx(soa),y=py(p),r=Math.max(3,Math.min(8,tot));
+    const contrasts = probeContrasts[soa]||[];
+    if(!contrasts.length) return;
+    const meanC = contrasts.reduce((a,b)=>a+b,0)/contrasts.length;
+    const x=msx(soa), y=py(meanC/100), r=Math.max(3,Math.min(8,tot));
     ctx2.fillStyle='rgba(0,229,255,0.15)';ctx2.beginPath();ctx2.arc(x,y,r,0,Math.PI*2);ctx2.fill();
     ctx2.strokeStyle='#00e5ff';ctx2.lineWidth=1.5;ctx2.beginPath();ctx2.arc(x,y,r,0,Math.PI*2);ctx2.stroke();
+    // detection rate as label inside dot
+    const pDet=(probeHits[soa]||0)/tot;
+    ctx2.fillStyle='rgba(0,229,255,0.8)';ctx2.font='7px Space Mono';ctx2.textAlign='center';
+    ctx2.fillText(Math.round(pDet*100)+'%',x,y+2.5);
   });
   ctx2.fillStyle='rgba(90,90,122,0.6)';ctx2.font='8px Space Mono';ctx2.textAlign='center';
   [50,150,300,450,600].forEach(s=>ctx2.fillText(s+'ms',msx(s),pad.t+cH+19));
-  ctx2.fillStyle='rgba(0,229,255,0.55)';ctx2.textAlign='right';ctx2.fillText('— model',pad.l+cW,pad.t+10);
-  ctx2.fillStyle='rgba(57,255,138,0.45)';ctx2.fillText('— baseline',pad.l+cW,pad.t+21);
+  ctx2.fillStyle='rgba(0,229,255,0.6)';ctx2.textAlign='right';ctx2.fillText('— threshold',pad.l+cW,pad.t+10);
+  ctx2.fillStyle='rgba(57,255,138,0.45)';ctx2.fillText('— base',pad.l+cW,pad.t+21);
+  ctx2.fillStyle='rgba(255,157,0,0.7)';ctx2.fillText('T1/T2 troughs',pad.l+cW,pad.t+32);
 }
 
 function drawContrastChart() {
+  // Shows the posterior mean threshold curve overlaid with empirical
+  // scatter of (SOA, contrast) trials coloured by detection outcome.
   const el=document.getElementById('contrast-chart');
   const ctx2=el.getContext('2d');
-  const W=el.parentElement.offsetWidth-2, H=130;
+  const W=el.parentElement.offsetWidth-2, H=150;
   el.width=W*devicePixelRatio; el.height=H*devicePixelRatio;
   el.style.width=W+'px'; el.style.height=H+'px';
   ctx2.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
   ctx2.clearRect(0,0,W,H);
-  const pad={l:36,r:12,t:12,b:30};
+  const pad={l:36,r:12,t:14,b:30};
   const cW=W-pad.l-pad.r, cH=H-pad.t-pad.b;
-  // Y axis: contrast %
-  const maxC = CFG.t2ContrastStart + CFG.t2ContrastRange + 5;
+  const modelMin=50, modelMax=CFG.soaMaxMs, mR=modelMax-modelMin;
+  const maxC=100;
+  const msx=s=>pad.l+(s-modelMin)/mR*cW;
+  const cy=c=>pad.t+cH*(1-c/maxC);
+
+  // Grid lines
   for(let i=0;i<=4;i++){
     const y=pad.t+cH*(1-i/4);
     ctx2.strokeStyle='rgba(28,28,46,1)';ctx2.lineWidth=1;
     ctx2.beginPath();ctx2.moveTo(pad.l,y);ctx2.lineTo(pad.l+cW,y);ctx2.stroke();
     ctx2.fillStyle='rgba(90,90,122,0.65)';ctx2.font='8px Space Mono';ctx2.textAlign='right';
-    ctx2.fillText(Math.round(i*maxC/4)+'%',pad.l-3,y+3);
+    ctx2.fillText((i*25)+'%',pad.l-3,y+3);
   }
-  // Plot mean contrast per bin
-  const binCentres = CONTRAST_BINS.map(b=>(b.lo+b.hi)/2);
-  const binMeans   = CONTRAST_BINS.map((_,bi)=>{
-    const s = BIN_STAIRCASES[bi];
-    if (!s || !s.history.length) return null;
-    // Use final staircase value as the converged threshold estimate
-    return s.contrast;
-  });
-  const modelMin=50, modelMax=600, mR=modelMax-modelMin;
-  const msx=s=>pad.l+(s-modelMin)/mR*cW;
-  const cy=c=>pad.t+cH*(1-c/maxC);
 
-  // Connect points
-  ctx2.strokeStyle='rgba(255,157,0,0.8)';ctx2.lineWidth=2;ctx2.setLineDash([]);
-  ctx2.beginPath(); let first=true;
-  binMeans.forEach((m,i)=>{
-    if(m===null) return;
-    const x=msx(binCentres[i]), y=cy(m);
-    first?ctx2.moveTo(x,y):ctx2.lineTo(x,y); first=false;
-  });
+  // Posterior mean threshold curve
+  ctx2.strokeStyle='rgba(0,229,255,0.7)';ctx2.lineWidth=2;ctx2.setLineDash([]);
+  ctx2.beginPath();let first=true;
+  for(let s=modelMin;s<=modelMax;s+=5){
+    const thr=QUEST.meanThreshold(s),x=msx(s),y=cy(thr);
+    first?ctx2.moveTo(x,y):ctx2.lineTo(x,y);first=false;
+  }
   ctx2.stroke();
 
-  // Dots
-  binMeans.forEach((m,i)=>{
-    if(m===null) return;
-    const x=msx(binCentres[i]), y=cy(m);
-    ctx2.fillStyle='rgba(255,157,0,0.25)';ctx2.beginPath();ctx2.arc(x,y,6,0,Math.PI*2);ctx2.fill();
-    ctx2.strokeStyle='var(--amber)';ctx2.lineWidth=1.5;ctx2.beginPath();ctx2.arc(x,y,6,0,Math.PI*2);ctx2.stroke();
-    ctx2.fillStyle='var(--amber)';ctx2.font='bold 8px Space Mono';ctx2.textAlign='center';
-    ctx2.fillText(m.toFixed(0)+'%',x,y-10);
+  // Trough markers
+  const tr=QUEST.troughs();
+  [[tr[0],'rgba(255,157,0,0.7)','T1'],[tr[1],'rgba(255,60,90,0.6)','T2']].forEach(([t,col,lbl])=>{
+    if(t.soa_ms<modelMin||t.soa_ms>modelMax) return;
+    ctx2.strokeStyle=col;ctx2.lineWidth=1;ctx2.setLineDash([3,3]);
+    ctx2.beginPath();ctx2.moveTo(msx(t.soa_ms),pad.t);ctx2.lineTo(msx(t.soa_ms),pad.t+cH);ctx2.stroke();
+    ctx2.setLineDash([]);
+    ctx2.fillStyle=col;ctx2.font='bold 8px Space Mono';ctx2.textAlign='center';
+    ctx2.fillText(lbl+' '+t.threshold_pct+'%',msx(t.soa_ms),pad.t+8);
   });
 
+  // Empirical scatter: each trial as a dot, hit=cyan, miss=red
+  trials.forEach(t=>{
+    if(!t.valid||t.t2Contrast===null||t.soa_ms===null) return;
+    if(t.soa_ms<modelMin||t.soa_ms>modelMax) return;
+    const x=msx(t.soa_ms), y=cy(t.t2Contrast);
+    ctx2.fillStyle=t.detected?'rgba(0,229,255,0.35)':'rgba(255,60,90,0.35)';
+    ctx2.beginPath();ctx2.arc(x,y,3,0,Math.PI*2);ctx2.fill();
+  });
+
+  // X axis labels
   ctx2.fillStyle='rgba(90,90,122,0.6)';ctx2.font='8px Space Mono';ctx2.textAlign='center';
-  [50,150,300,450,600].forEach(s=>ctx2.fillText(s+'ms',msx(s),pad.t+cH+19));
-  ctx2.fillStyle='rgba(255,157,0,0.7)';ctx2.textAlign='right';
-  ctx2.fillText('— threshold contrast',pad.l+cW,pad.t+10);
+  const xTicks=[100,200,300,400,500,600,700,800].filter(s=>s<=modelMax);
+  xTicks.forEach(s=>ctx2.fillText(s+'ms',msx(s),pad.t+cH+19));
+
+  // Legend
+  ctx2.fillStyle='rgba(0,229,255,0.6)';ctx2.textAlign='right';
+  ctx2.fillText('— threshold',pad.l+cW,pad.t+10);
+  ctx2.fillStyle='rgba(0,229,255,0.5)';
+  ctx2.fillText('● hit',pad.l+cW,pad.t+21);
+  ctx2.fillStyle='rgba(255,60,90,0.6)';
+  ctx2.fillText('● miss',pad.l+cW-30,pad.t+21);
 }
 
 function drawFreqChart() {
@@ -1381,7 +1527,7 @@ function drawFreqChart() {
 //  CSV EXPORT
 // ════════════════════════════════════════════════════════════════════
 function downloadCSV() {
-  let csv = 'Trial,SOA_ms,T1_Char,T2_Char,T1_Tapped,T1_RT_ms,T2_Detected,T2_RT_ms,T2_Contrast_pct,Valid\n';
+  let csv = 'Trial,SOA_ms,T2_Contrast_pct,T1_Char,T2_Char,T1_Tapped,T1_RT_ms,T2_Detected,T2_RT_ms,Valid\n';
   trials.forEach((t,i) => {
     if (t.detected === null && t.valid !== false) return;
     csv += `${i+1},${t.soa_ms??''},${t.t1Char??''},${t.t2Char??''},` +
@@ -1392,22 +1538,25 @@ function downloadCSV() {
   csv += `\nSummary\n`;
   csv += `Paradigm,Twitch v2.0\n`;
   csv += `Model,Damped Sine (tau=250ms)\n`;
+  const tr = QUEST.troughs();
   csv += `Freq_Hz_mean,${QUEST.meanFreq().toFixed(4)}\n`;
   csv += `Freq_Hz_MAP,${QUEST.mapFreq().toFixed(4)}\n`;
-  csv += `Trough_ms_mean,${QUEST.meanTroughMs().toFixed(2)}\n`;
-  csv += `Amp_mean,${QUEST.meanAmp().toFixed(4)}\n`;
-  csv += `Base_mean,${QUEST.meanBase().toFixed(4)}\n`;
+  csv += `Tau_ms_mean,${QUEST.meanTau().toFixed(1)}\n`;
+  csv += `Amp_contrast_pct,${QUEST.meanAmp().toFixed(2)}\n`;
+  csv += `Base_threshold_pct,${QUEST.meanBase().toFixed(2)}\n`;
+  csv += `Sigma_fixed,${QUEST.SIGMA_C}\n`;
+  csv += `Trough1_soa_ms,${tr[0].soa_ms}\n`;
+  csv += `Trough1_threshold_pct,${tr[0].threshold_pct}\n`;
+  csv += `Trough2_soa_ms,${tr[1].soa_ms}\n`;
+  csv += `Trough2_threshold_pct,${tr[1].threshold_pct}\n`;
+  csv += `Trough3_soa_ms,${tr[2].soa_ms}\n`;
+  csv += `Trough3_threshold_pct,${tr[2].threshold_pct}\n`;
   csv += `Confidence_pct,${(QUEST.confidence()*100).toFixed(2)}\n`;
   csv += `Valid_trials,${trials.filter(t=>t.valid).length}\n`;
   csv += `Discarded_trials,${trials.filter(t=>t.valid===false).length}\n`;
   const t1RTMean = t1RTs.length ? Math.round(t1RTs.reduce((a,b)=>a+b,0)/t1RTs.length) : '';
   csv += `Mean_T1_RT_ms,${t1RTMean}\n`;
   csv += `Median_T1_RT_ms,${t1RTs.length ? Math.round(medianT1RT) : ''}\n`;
-  // Per-bin contrast thresholds
-  CONTRAST_BINS.forEach((b,bi) => {
-    const s = BIN_STAIRCASES[bi];
-    if (s) csv += `Contrast_${b.label},${s.contrast.toFixed(1)}%,reversals=${s.reversals}\n`;
-  });
 
   const blob=new Blob([csv],{type:'text/csv'});
   const url=URL.createObjectURL(blob);
@@ -1420,14 +1569,15 @@ function downloadCSV() {
 // ════════════════════════════════════════════════════════════════════
 //  STORAGE
 // ════════════════════════════════════════════════════════════════════
-function saveResult(hz, mapHz, troughMs, ampVal, baselineRate, blinkDepth, confPct) {
+function saveResult(hz, mapHz, trough1Ms, trough2Ms, ampVal, baseC, thr1, thr2, confPct) {
   const h = JSON.parse(localStorage.getItem('theta_history')||'[]');
   h.unshift({
     hz: parseFloat(hz).toFixed(2), mapHz: parseFloat(mapHz).toFixed(2),
-    troughMs: Math.round(troughMs), amp: parseFloat(ampVal).toFixed(2),
-    baselineRate, blinkDepth, confPct,
+    trough1Ms: Math.round(trough1Ms), trough2Ms: Math.round(trough2Ms),
+    amp: parseFloat(ampVal).toFixed(1),
+    baseC, thr1, thr2, confPct,
     trials: trials.filter(t=>t.valid).length,
-    paradigm: 'v2.0',
+    paradigm: 'v3.0',
     date: new Date().toLocaleDateString(),
     time: new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})
   });
@@ -1446,7 +1596,7 @@ function renderHistory() {
     <div class="history-entry">
       <div>
         <div class="history-hz">${s.hz} Hz${s.paradigm?' <span style="font-size:9px;color:var(--muted)">'+s.paradigm+'</span>':''}</div>
-        <div class="history-conf">trough ${s.troughMs??'—'}ms · A=${s.amp??'—'} · Blink ↓${s.blinkDepth}% · Conf ${s.confPct}%</div>
+        <div class="history-conf">T1: ${s.thr1??'—'}%@${s.trough1Ms??'—'}ms · T2: ${s.thr2??'—'}%@${s.trough2Ms??'—'}ms · A=${s.amp??'—'}% · Conf ${s.confPct}%</div>
       </div>
       <div class="history-meta">${s.date}<br>${s.time}<br>${s.trials} trials</div>
     </div>`).join('');
@@ -1457,6 +1607,32 @@ function clearHistory() {
     localStorage.removeItem('theta_history'); renderHistory();
   }
 }
+
+// ── Tap overlay event binding ─────────────────────────────────────────
+// Use touchstart for lowest latency on iOS; fall back to pointerdown.
+// preventDefault() on touchstart kills the 300ms delay and ghost clicks.
+(function() {
+  function bindTap() {
+    const el = document.getElementById('tap-overlay');
+    if (!el) return;
+    // touchstart: lowest latency on iOS, prevent ghost pointerdown
+    el.addEventListener('touchstart', function(e) {
+      e.preventDefault();
+      handleTap();
+    }, { passive: false });
+    // pointerdown: covers mouse + non-touch pointer devices
+    el.addEventListener('pointerdown', function(e) {
+      // Skip if already handled by touchstart (touch devices fire both)
+      if (e.pointerType === 'touch') return;
+      handleTap();
+    });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bindTap);
+  } else {
+    bindTap();
+  }
+})();
 
 // ── Boot ──────────────────────────────────────────────────────────────
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
