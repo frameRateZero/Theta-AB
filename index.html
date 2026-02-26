@@ -209,7 +209,7 @@
         <span class="setting-name">Stream Speed</span>
         <span class="setting-val" id="lbl-speed">—</span>
       </div>
-      <input type="range" class="setting-slider" id="sl-speed" min="6" max="16" step="1" value="8" oninput="updateSettings()">
+      <input type="range" class="setting-slider" id="sl-speed" min="4" max="16" step="1" value="8" oninput="updateSettings()">
     </div>
 
     <div class="setting-row">
@@ -801,7 +801,7 @@ function setLbl(id, val) { const e=getEl(id); if(e) e.textContent=val; }
 
 function updateSettings() {
   const speed = getEl('sl-speed');
-  if (speed) { CFG.framesPerItem = parseInt(speed.value); setLbl('lbl-speed', Math.round(CFG.framesPerItem*(1000/120))+'ms/item'); }
+  if (speed) { CFG.framesPerItem = parseInt(speed.value); setLbl('lbl-speed', Math.round(CFG.framesPerItem*(1000/(measuredFPS||60)))+'ms/item'); }
 
   const font = getEl('sl-t1font');
   if (font) { CFG.t1FontPx = parseInt(font.value); setLbl('lbl-t1font', CFG.t1FontPx+'px'); }
@@ -994,7 +994,7 @@ function startSession() {
   // — never in a loop, to avoid blocking the main thread.
   const soaList = [...new Set(stimCandidates.map(c=>c.soa_ms))];
   for (let i=0; i<TOTAL_TRIALS; i++) {
-    if (i < 16) {  // 16 random warm-up; first EIG assigned after trial 14 completes
+    if (i < 8) {   // 8 random warm-up; EIG takes over from trial 8
       const soa = soaList[Math.floor(Math.random()*soaList.length)];
       trials.push({ soa_ms: soa, contrast_pct: 40,
                     detected: null, t1RT: null, t2RT: null,
@@ -1566,14 +1566,15 @@ function downloadCSV() {
   let csv = 'Trial,SOA_ms,T2_Contrast_pct,T1_Char,T2_Char,T1_Tapped,T1_RT_ms,T2_Detected,T2_RT_ms,Valid\n';
   trials.forEach((t,i) => {
     if (t.detected === null && t.valid !== false) return;
-    csv += `${i+1},${t.soa_ms??''},${t.t1Char??''},${t.t2Char??''},` +
+    csv += `${i+1},${t.soa_ms??''},${t.t2Contrast!==null?t.t2Contrast.toFixed(1):''},` +
+           `${t.t1Char??''},${t.t2Char??''},` +
            `${t.t1Tapped?1:0},${t.t1RT!==null?Math.round(t.t1RT):''},` +
            `${t.detected?1:0},${t.t2RT!==null?Math.round(t.t2RT):''},` +
-           `${t.t2Contrast!==null?t.t2Contrast.toFixed(1):''},${t.valid?1:0}\n`;
+           `${t.valid?1:0}\n`;
   });
   csv += `\nSummary\n`;
   csv += `Paradigm,Twitch v2.0\n`;
-  csv += `Model,Damped Sine (tau=250ms)\n`;
+  csv += `Model,Contrast-Threshold Damped Sine Surface\n`;
   const tr = QUEST.troughs();
   csv += `Freq_Hz_mean,${QUEST.meanFreq().toFixed(4)}\n`;
   csv += `Freq_Hz_MAP,${QUEST.mapFreq().toFixed(4)}\n`;
