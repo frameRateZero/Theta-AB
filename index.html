@@ -235,7 +235,7 @@
         <span class="setting-name">Trials</span>
         <span class="setting-val" id="lbl-trials">—</span>
       </div>
-      <input type="range" class="setting-slider" id="sl-trials" min="40" max="300" step="10" value="120" oninput="updateSettings()">
+      <input type="range" class="setting-slider" id="sl-trials" min="30" max="300" step="10" value="120" oninput="updateSettings()">
     </div>
 
     <div class="settings-divider"></div>
@@ -400,22 +400,7 @@
 <div id="toast" class="hidden">—</div>
 
 <script>
-// ── Global error trap — shows errors on screen so mobile can see them ──
-window.onerror = function(msg, src, line, col, err) {
-  const div = document.createElement('div');
-  div.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#ff2255;color:#fff;' +
-    'font:12px monospace;padding:8px;z-index:9999;word-break:break-all;';
-  div.textContent = `ERR L${line}: ${msg}`;
-  document.body.appendChild(div);
-  return false;
-};
-window.onunhandledrejection = function(e) {
-  const div = document.createElement('div');
-  div.style.cssText = 'position:fixed;top:40px;left:0;right:0;background:#ff6600;color:#fff;' +
-    'font:12px monospace;padding:8px;z-index:9999;word-break:break-all;';
-  div.textContent = 'PROMISE: ' + (e.reason?.message || e.reason);
-  document.body.appendChild(div);
-};
+
 // ════════════════════════════════════════════════════════════════════
 //  θ WAVE v2.0 — Twitch Paradigm
 //  T1 tap → RT captured → weights QUEST
@@ -779,6 +764,14 @@ function buildStimCandidates(mspf) {
 
 let currentContrast_pct = 40;
 
+function contrastToHex(pct) {
+  // pct: 0=invisible (same as bg gray #808080), 100=max dark (#000000)
+  // High pct = easy to see (dark on gray), low pct = hard to see
+  const lum = Math.round(128 - (pct / 100) * 128);
+  const h = Math.max(0, Math.min(255, lum)).toString(16).padStart(2, '0');
+  return '#' + h + h + h;
+}
+
 function resetStaircases() { /* QUEST handles everything */ }
 function resetBinStaircases() { resetStaircases(); }
 
@@ -912,7 +905,7 @@ let preItemsTarget= 0;
 
 function countdown(n, cb) {
   if (n <= 0) { cb(); return; }
-  if (!ctx) { console.error('countdown: ctx null at n='+n); cb(); return; }
+  if (!ctx) { cb(); return; }
   drawBg();
   const W=canvas.width/devicePixelRatio, H=canvas.height/devicePixelRatio;
   ctx.fillStyle=T1_COLOR; ctx.font='bold 72px Arial';
@@ -982,7 +975,7 @@ function startSession() {
 
   canvas = document.getElementById('task-canvas');
   ctx    = canvas.getContext('2d');
-  if (!ctx) { console.error('Canvas context null!'); return; }
+  if (!ctx) { return; }
   function resizeCanvas() {
     canvas.width  = window.innerWidth  * devicePixelRatio;
     canvas.height = window.innerHeight * devicePixelRatio;
@@ -1016,7 +1009,7 @@ function startSession() {
   // EIG trials assigned lazily in finishTrial() — nothing to pre-compute here
 
   document.getElementById('tap-overlay').style.display = 'block';
-  countdown(3, () => { console.log('countdown done, starting trial'); sessionActive = true; startTrial(); });
+  countdown(3, () => { sessionActive = true; startTrial(); });
 }
 
 function abortSession() {
@@ -1032,7 +1025,6 @@ function abortSession() {
 //  Phases: pre → t1 → mask_t1 → lag → t2 → mask_t2 → runout → done
 // ════════════════════════════════════════════════════════════════════
 function startTrial() {
-  console.log('startTrial', currentTrial, 'soa='+trials[currentTrial]?.soa_ms, 'c='+trials[currentTrial]?.contrast_pct);
   if (!sessionActive || currentTrial >= TOTAL_TRIALS) { endSession(); return; }
 
   const trial = trials[currentTrial];
@@ -1080,7 +1072,6 @@ function startTrial() {
 
   currentItem = { char: pickLetter(), color: DIST_COLOR, role: 'dist' };
   if (animFrame) cancelAnimationFrame(animFrame);
-  console.log('RAF scheduled, phase='+phase);
   animFrame = requestAnimationFrame(streamLoop);
 }
 
@@ -1091,6 +1082,7 @@ function pickLetter() {
 // ── Stream loop ────────────────────────────────────────────────────
 function streamLoop() {
   if (!sessionActive) return;
+  if (!ctx) return;
   phaseFrame++;
 
   switch(phase) {
