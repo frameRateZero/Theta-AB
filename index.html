@@ -1031,24 +1031,48 @@ function startSession() {
   msPerFrame     = 1000 / (measuredFPS || 120);
   stimCandidates = buildStimCandidates(msPerFrame);
 
-  // Pre-assign warm-up trials only (random SOA, visible contrast).
-  // EIG trials are assigned one-at-a-time after each trial completes
-  // — never in a loop, to avoid blocking the main thread.
-  // soaList already respects SOA_FLOOR_MS (built into stimCandidates)
-  const soaList = [...new Set(stimCandidates.map(c=>c.soa_ms))];
+  // ── Phase 1: Structured Latin square sweep ──────────────────────
+  // 5 SOAs × 3 contrasts = 15 cells, each visited once in random order.
+  // Gives QUEST a full likelihood surface before EIG starts.
+  // SOAs span the blink zone (floor → max), contrasts span low/mid/high.
+  // One extra 40% warmup trial at start so participant finds the task.
+  const sweepSOAs = (() => {
+    const lo = SOA_FLOOR_MS, hi = CFG.soaMaxMs;
+    const pts = [lo, lo+(hi-lo)*0.25, lo+(hi-lo)*0.5, lo+(hi-lo)*0.75, hi];
+    // Quantise each to nearest frame boundary
+    return pts.map(ms => Math.round(Math.round(ms/msPerFrame)*msPerFrame));
+  })();
+  const sweepContrasts = [15, 40, 75]; // low / mid / high
+  // Build 15-cell grid and shuffle
+  const sweepGrid = [];
+  sweepSOAs.forEach(soa =>
+    sweepContrasts.forEach(c => sweepGrid.push({soa_ms: soa, contrast_pct: c}))
+  );
+  // Fisher-Yates shuffle
+  for (let i = sweepGrid.length-1; i > 0; i--) {
+    const j = Math.floor(Math.random()*(i+1));
+    [sweepGrid[i], sweepGrid[j]] = [sweepGrid[j], sweepGrid[i]];
+  }
+  // One gentle opener (middle SOA, 40%) so participant isn't surprised by 75%
+  const opener = { soa_ms: sweepSOAs[2], contrast_pct: 40 };
+  const sweepTrials = [opener, ...sweepGrid]; // 16 total
+  const N_SWEEP = sweepTrials.length; // store for finishTrial routing
+
   for (let i=0; i<TOTAL_TRIALS; i++) {
-    if (i < 8) {   // 8 random warm-up; EIG takes over from trial 8
-      const soa = soaList[Math.floor(Math.random()*soaList.length)];
-      trials.push({ soa_ms: soa, contrast_pct: 40,
+    if (i < N_SWEEP) {
+      const s = sweepTrials[i];
+      trials.push({ soa_ms: s.soa_ms, contrast_pct: s.contrast_pct,
                     detected: null, t1RT: null, t2RT: null,
-                    t2Contrast: null, t1Tapped: false });
+                    t2Contrast: null, t1Tapped: false, phase: 'sweep' });
     } else {
-      // Placeholder — will be filled in by finishTrial() via EIG
+      // Placeholder — filled by finishTrial() via EIG
       trials.push({ soa_ms: null, contrast_pct: null,
                     detected: null, t1RT: null, t2RT: null,
-                    t2Contrast: null, t1Tapped: false });
+                    t2Contrast: null, t1Tapped: false, phase: 'eig' });
     }
   }
+  // Store sweep length so finishTrial knows when EIG starts
+  window._nSweep = N_SWEEP;
   // EIG trials assigned lazily in finishTrial() — nothing to pre-compute here
 
   document.getElementById('tap-overlay').style.display = 'block';
@@ -1312,26 +1336,52 @@ function finishTrial() {
     probeContrasts[soa].push(trial.t2Contrast);
 
     // Schedule next stim async during ITI.
-    // Strategy: 25% of post-warmup trials explore trough 2/3 explicitly.
-    // Remaining 75% use EIG on the full candidate grid.
-    // This prevents the posterior collapsing onto trough 1 forever.
-    const ni  = currentTrial + 1;
-    const ni2 = currentTrial + 2;
-    const tgt = (ni2 < TOTAL_TRIALS && trials[ni2] && trials[ni2].soa_ms === null) ? ni2
-              : (ni  < TOTAL_TRIALS && trials[ni]  && trials[ni].soa_ms  === null) ? ni
-              : -1;
-    if (tgt >= 0) {
-      // Decide pool: 25% exploration (trough 2/3 targeted), 75% EIG
-      const useExplore = (currentTrial >= 8) && (Math.random() < 0.25);
-      const pool = useExplore
-        ? buildTroughExploreCandidates(msPerFrame)
-        : stimCandidates;
-      QUEST.scheduleNextStim(pool, stim => {
+    // Trial routing after sweep phase (window._nSweep trials):
+    //   85% → pure EIG on full candidate grid
+    //   10% → trough 2/3 targeted exploration (prevent posterior collapse)
+    //    5% → high-contrast anchor (70–90%) at random SOA to top-anchor
+    //          the psychometric function and detect absolute suppression
+    const ni   = currentTrial + 1;
+    const ni2  = currentTrial + 2;
+    const tgt  = (ni2 < TOTAL_TRIALS && trials[ni2] && trials[ni2].soa_ms === null) ? ni2
+               : (ni  < TOTAL_TRIALS && trials[ni]  && trials[ni].soa_ms  === null) ? ni
+               : -1;
+    const nSweep = window._nSweep || 16;
+    if (tgt >= 0 && currentTrial >= nSweep) {
+      const r = Math.random();
+      let pool;
+      if (r < 0.05) {
+        // High-contrast anchor: random SOA, contrast 70–90%
+        const soaList2 = [...new Set(stimCandidates.map(c=>c.soa_ms))];
+        const anchorSOA = soaList2[Math.floor(Math.random()*soaList2.length)];
+        const anchorC   = 70 + Math.floor(Math.random()*3)*10; // 70, 80, or 90%
         if (trials[tgt]) {
-          trials[tgt].soa_ms       = stim.soa_ms;
-          trials[tgt].contrast_pct = stim.contrast_pct;
+          trials[tgt].soa_ms       = anchorSOA;
+          trials[tgt].contrast_pct = anchorC;
+          trials[tgt].phase        = 'anchor';
         }
-      });
+        // Don't call scheduleNextStim — already assigned directly
+      } else if (r < 0.15) {
+        // Trough 2/3 exploration
+        pool = buildTroughExploreCandidates(msPerFrame);
+        QUEST.scheduleNextStim(pool, stim => {
+          if (trials[tgt]) {
+            trials[tgt].soa_ms       = stim.soa_ms;
+            trials[tgt].contrast_pct = stim.contrast_pct;
+            trials[tgt].phase        = 'explore';
+          }
+        });
+      } else {
+        // Pure EIG
+        pool = stimCandidates;
+        QUEST.scheduleNextStim(pool, stim => {
+          if (trials[tgt]) {
+            trials[tgt].soa_ms       = stim.soa_ms;
+            trials[tgt].contrast_pct = stim.contrast_pct;
+            trials[tgt].phase        = 'eig';
+          }
+        });
+      }
     }
   }
 
@@ -1613,10 +1663,10 @@ function drawFreqChart() {
 //  CSV EXPORT
 // ════════════════════════════════════════════════════════════════════
 function downloadCSV() {
-  let csv = 'Trial,SOA_ms,T2_Contrast_pct,T1_Char,T2_Char,T1_Tapped,T1_RT_ms,T2_Detected,T2_RT_ms,Valid\n';
+  let csv = 'Trial,Phase,SOA_ms,T2_Contrast_pct,T1_Char,T2_Char,T1_Tapped,T1_RT_ms,T2_Detected,T2_RT_ms,Valid\n';
   trials.forEach((t,i) => {
     if (t.detected === null && t.valid !== false) return;
-    csv += `${i+1},${t.soa_ms??''},${t.t2Contrast!==null?t.t2Contrast.toFixed(1):''},` +
+    csv += `${i+1},${t.phase??'eig'},${t.soa_ms??''},${t.t2Contrast!==null?t.t2Contrast.toFixed(1):''},` +
            `${t.t1Char??''},${t.t2Char??''},` +
            `${t.t1Tapped?1:0},${t.t1RT!==null?Math.round(t.t1RT):''},` +
            `${t.detected?1:0},${t.t2RT!==null?Math.round(t.t2RT):''},` +
@@ -1628,6 +1678,8 @@ function downloadCSV() {
   csv += `\nSettings\n`;
   csv += `FPS_measured,${measuredFPS}\n`;
   csv += `SOA_floor_ms,${SOA_FLOOR_MS}\n`;
+  csv += `Sweep_trials,${window._nSweep||16}\n`;
+  csv += `Sweep_SOAs,${[...new Set(stimCandidates.map(c=>c.soa_ms))].filter((_,i,a)=>i<5).join('|')}\n`;
   csv += `Frames_per_item,${CFG.framesPerItem}\n`;
   csv += `Item_duration_ms,${Math.round(CFG.framesPerItem*(1000/measuredFPS))}\n`;
   csv += `SOA_max_ms,${CFG.soaMaxMs}\n`;
