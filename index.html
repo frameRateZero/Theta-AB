@@ -1392,11 +1392,11 @@ function drawSOAChart(baseP, troughMs) {
   const tr=QUEST.troughs();
   [tr[0],tr[1]].forEach((t,i)=>{
     if(t.soa_ms<modelMin||t.soa_ms>modelMax) return;
-    ctx2.strokeStyle=i===0?'rgba(255,157,0,0.6)":'rgba(255,60,90,0.5)';
+    ctx2.strokeStyle=i===0?'rgba(255,157,0,0.6)':'rgba(255,60,90,0.5)';;
     ctx2.lineWidth=1;ctx2.setLineDash([3,3]);
     ctx2.beginPath();ctx2.moveTo(msx(t.soa_ms),pad.t);ctx2.lineTo(msx(t.soa_ms),pad.t+cH);ctx2.stroke();
     ctx2.setLineDash([]);
-    ctx2.fillStyle=i===0?'rgba(255,157,0,0.8)":'rgba(255,60,90,0.7)';
+    ctx2.fillStyle=i===0?'rgba(255,157,0,0.8)':'rgba(255,60,90,0.7)';
     ctx2.font='8px Space Mono';ctx2.textAlign='center';
     ctx2.fillText('T'+(i+1),msx(t.soa_ms),pad.t+8);
   });
