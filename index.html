@@ -968,21 +968,28 @@ function startSession() {
   msPerFrame     = 1000 / (measuredFPS || 120);
   stimCandidates = buildStimCandidates(msPerFrame);
 
-  // Pre-assign stimuli for all trials
-  // Warm-up (first 15): random SOA, contrast starts at 40% (visible) and adapts
+  // Pre-assign warm-up trials only (random SOA, visible contrast).
+  // EIG trials are assigned one-at-a-time after each trial completes
+  // — never in a loop, to avoid blocking the main thread.
+  const soaList = [...new Set(stimCandidates.map(c=>c.soa_ms))];
   for (let i=0; i<TOTAL_TRIALS; i++) {
-    let stim;
     if (i < 15) {
-      // Random SOA, moderate contrast so participant can find the task
-      const soaList = [...new Set(stimCandidates.map(c=>c.soa_ms))];
-      const soa     = soaList[Math.floor(Math.random()*soaList.length)];
-      stim = { soa_ms: soa, contrast_pct: 40 };
+      const soa = soaList[Math.floor(Math.random()*soaList.length)];
+      trials.push({ soa_ms: soa, contrast_pct: 40,
+                    detected: null, t1RT: null, t2RT: null,
+                    t2Contrast: null, t1Tapped: false });
     } else {
-      stim = QUEST.nextStim(stimCandidates);
+      // Placeholder — will be filled in by finishTrial() via EIG
+      trials.push({ soa_ms: null, contrast_pct: null,
+                    detected: null, t1RT: null, t2RT: null,
+                    t2Contrast: null, t1Tapped: false });
     }
-    trials.push({ soa_ms: stim.soa_ms, contrast_pct: stim.contrast_pct,
-                  detected: null, t1RT: null, t2RT: null,
-                  t2Contrast: null, t1Tapped: false });
+  }
+  // Pre-fill trial 15 now (first EIG trial) so startTrial() has it ready
+  if (TOTAL_TRIALS > 15) {
+    const stim = QUEST.nextStim(stimCandidates);
+    trials[15].soa_ms      = stim.soa_ms;
+    trials[15].contrast_pct= stim.contrast_pct;
   }
 
   document.getElementById('tap-overlay').style.display = 'block';
@@ -1026,6 +1033,13 @@ function startTrial() {
   phaseFrame= 0;
 
   // Get contrast assigned by QUEST for this trial
+  // If somehow null (shouldn't happen), fall back to 40%
+  if (trial.soa_ms === null || trial.contrast_pct === null) {
+    const stim = QUEST.nextStim(stimCandidates);
+    trial.soa_ms       = stim.soa_ms;
+    trial.contrast_pct = stim.contrast_pct;
+    currentSOA_ms      = trial.soa_ms;
+  }
   currentContrast_pct = trial.contrast_pct !== undefined ? trial.contrast_pct : 40;
   currentT2Color      = contrastToHex(currentContrast_pct);
   trial.t2Contrast    = currentContrast_pct;
@@ -1238,14 +1252,20 @@ function finishTrial() {
     if (detected) probeHits[soa]++; else probeMisses[soa]++;
     probeContrasts[soa].push(trial.t2Contrast);
 
-    // Pre-assign next trial stimulus via EIG (after warm-up)
-    const ni = currentTrial + 1;
-    if (ni < TOTAL_TRIALS && trials[ni] && trials[ni].soa_ms !== null) {
-      if (ni >= 15) {
-        const stim = QUEST.nextStim(stimCandidates);
-        trials[ni].soa_ms       = stim.soa_ms;
-        trials[ni].contrast_pct = stim.contrast_pct;
-      }
+    // Assign the trial AFTER next via EIG — one call, runs after
+    // posterior has been updated with this trial's data.
+    const ni = currentTrial + 1;  // next trial (may already be assigned)
+    const ni2 = currentTrial + 2; // the one after — assign this now
+    if (ni2 < TOTAL_TRIALS && trials[ni2] && trials[ni2].soa_ms === null) {
+      const stim = QUEST.nextStim(stimCandidates);
+      trials[ni2].soa_ms       = stim.soa_ms;
+      trials[ni2].contrast_pct = stim.contrast_pct;
+    }
+    // Safety: if next trial somehow has no stimulus, assign it now
+    if (ni < TOTAL_TRIALS && trials[ni] && trials[ni].soa_ms === null) {
+      const stim = QUEST.nextStim(stimCandidates);
+      trials[ni].soa_ms       = stim.soa_ms;
+      trials[ni].contrast_pct = stim.contrast_pct;
     }
   }
 
