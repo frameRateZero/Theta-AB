@@ -459,105 +459,85 @@ function calibrate() {
 // ════════════════════════════════════════════════════════════════════
 //  QUEST — Contrast-Threshold Damped Sine Surface Model
 //
-//  We measure the CONTRAST THRESHOLD at each SOA — the minimum contrast
-//  needed to detect T2. This threshold oscillates as a damped sine:
+//  threshold(SOA) = base + A * sin(2π*f*SOA/1000) * exp(-SOA/τ)
+//  p(detect)      = logistic( (contrast - threshold) / σ )
 //
-//    threshold(SOA) = base + A * sin(2π * f * SOA/1000) * exp(-SOA/τ)
+//  Parameters: f (freq), A (amplitude %), base (threshold %), τ (decay)
+//  σ fixed. Joint (SOA, contrast) EIG selection each trial.
 //
-//  Convention:
-//    base  = resting threshold (low contrast, easy — e.g. 5–15%)
-//    A     = blink amplitude in contrast % (how much harder at trough)
-//    trough peaks (sin=+1): threshold = base+A  (HIGH contrast needed)
-//    recovery valleys (sin=-1): threshold ≈ base (LOW contrast, easy)
-//
-//  First trough ~1/(4f), second ~5/(4f), third ~9/(4f).
-//  τ controls damping — free parameter so we can find 2nd/3rd troughs.
-//
-//  Detection likelihood uses a logistic psychometric function:
-//    p(detect | SOA, contrast) = 1 / (1 + exp(-(contrast - threshold) / σ))
-//  σ fixed at SIGMA_C (contrast JND slope, ~8%).
-//
-//  EIG jointly selects (SOA, contrast) each trial — no separate staircase.
+//  PERFORMANCE:
+//  - Reduced grid: 15×5×4×3 = 900 cells (was 3000)
+//  - Reduced candidates: 15 SOA × 8 contrast = 120 (was 240)
+//  - Float32Array throughout for typed-array speed
+//  - EIG runs async in ITI via nextStimAsync() — never blocks
 // ════════════════════════════════════════════════════════════════════
 const QUEST = (() => {
-  // ── Fixed slope of psychometric function (contrast %) ────────────
   const SIGMA_C = 8.0;
 
-  // ── Parameter grids ──────────────────────────────────────────────
-  const nF   = 20;
-  const fGrid = Array.from({length:nF}, (_,i) => 3.0 + i*(5.0/(nF-1)));  // 3–8 Hz
+  // ── Grids (tighter than before — 900 cells total) ────────────────
+  const nF = 15;
+  const fGrid = Array.from({length:nF}, (_,i) => 3.0 + i*(5.0/(nF-1))); // 3–8 Hz
 
-  // Amplitude: how deep the blink is in contrast % units
-  // First trough threshold = base + A
-  const ampGrid  = [5, 10, 18, 28, 40, 55];   // contrast %
+  const ampGrid  = [5, 12, 22, 35, 55];      // contrast % amplitude, 5 levels
   const nA       = ampGrid.length;
 
-  // Base threshold: resting contrast needed outside blink
-  const baseGrid = [3, 6, 10, 16, 24];         // contrast %
+  const baseGrid = [3, 7, 14, 24];            // resting threshold %, 4 levels
   const nB       = baseGrid.length;
 
-  // Tau: decay time constant — free so 2nd/3rd troughs can emerge
-  const tauGrid  = [150, 250, 400, 600, 900];  // ms
+  const tauGrid  = [180, 380, 750];           // decay ms, 3 levels
   const nT       = tauGrid.length;
 
-  const N = nF * nA * nB * nT;
-  let logPost = new Float64Array(N).fill(-Math.log(N));
+  const N = nF * nA * nB * nT;               // 900
+  let logPost = new Float32Array(N).fill(-Math.log(N));
 
+  // Flat index
   function idx(fi, ai, bi, ti) {
     return fi*(nA*nB*nT) + ai*(nB*nT) + bi*nT + ti;
   }
 
-  // Threshold contrast at given SOA for parameter combination
+  // Threshold contrast at SOA for param combo
   function threshold(soa_ms, fi, ai, bi, ti) {
-    const f    = fGrid[fi];
-    const A    = ampGrid[ai];
-    const base = baseGrid[bi];
-    const tau  = tauGrid[ti];
-    const sine = Math.sin(2 * Math.PI * f * soa_ms / 1000);
-    const env  = Math.exp(-soa_ms / tau);
-    // Clamp so threshold stays in [1%, 99%]
-    return Math.max(1, Math.min(99, base + A * sine * env));
+    const sine = Math.sin(2 * Math.PI * fGrid[fi] * soa_ms / 1000);
+    const env  = Math.exp(-soa_ms / tauGrid[ti]);
+    return Math.max(1, Math.min(99, baseGrid[bi] + ampGrid[ai] * sine * env));
   }
 
-  // p(detect) via logistic psychometric function
+  // Logistic detection probability
   function pDet(soa_ms, contrast_pct, fi, ai, bi, ti) {
-    const thr = threshold(soa_ms, fi, ai, bi, ti);
-    return 1 / (1 + Math.exp(-(contrast_pct - thr) / SIGMA_C));
+    return 1 / (1 + Math.exp(-(contrast_pct - threshold(soa_ms,fi,ai,bi,ti)) / SIGMA_C));
   }
 
-  // Log-sum-exp for numerical stability
+  // Log-sum-exp
   function lae(a, b) {
     if (a === -Infinity) return b;
     if (b === -Infinity) return a;
-    return a > b ? a + Math.log(1 + Math.exp(b-a))
-                 : b + Math.log(1 + Math.exp(a-b));
+    return a > b ? a + Math.log(1+Math.exp(b-a)) : b + Math.log(1+Math.exp(a-b));
   }
 
   // ── Posterior update ─────────────────────────────────────────────
-  // Now takes contrast_pct as well as detected + soa
   function update(detected, soa_ms, contrast_pct, weight=1.0) {
-    const lp = new Float64Array(N);
+    let mx = -Infinity;
+    const lp = new Float32Array(N);
     for (let fi=0;fi<nF;fi++)
       for (let ai=0;ai<nA;ai++)
         for (let bi=0;bi<nB;bi++)
           for (let ti=0;ti<nT;ti++) {
+            const i  = idx(fi,ai,bi,ti);
             const p  = pDet(soa_ms, contrast_pct, fi, ai, bi, ti);
             const ll = detected ? Math.log(Math.max(1e-9,p))
                                 : Math.log(Math.max(1e-9,1-p));
-            lp[idx(fi,ai,bi,ti)] = logPost[idx(fi,ai,bi,ti)] + weight * ll;
+            lp[i] = logPost[i] + weight * ll;
+            if (lp[i] > mx) mx = lp[i];
           }
-    // Normalise in log space
-    let mx = -Infinity;
-    lp.forEach(v => { if(v>mx) mx=v; });
     let s = 0;
-    lp.forEach(v => s += Math.exp(v-mx));
+    for (let i=0;i<N;i++) s += Math.exp(lp[i]-mx);
     const lz = mx + Math.log(s);
     for (let i=0;i<N;i++) logPost[i] = lp[i] - lz;
   }
 
-  // ── Marginal posteriors ───────────────────────────────────────────
+  // ── Marginals ─────────────────────────────────────────────────────
   function freqPost() {
-    const post = new Float64Array(nF);
+    const post = new Float32Array(nF);
     for (let fi=0;fi<nF;fi++) {
       let s = -Infinity;
       for (let ai=0;ai<nA;ai++)
@@ -567,11 +547,12 @@ const QUEST = (() => {
       post[fi] = Math.exp(s);
     }
     const tot = post.reduce((a,b)=>a+b,0);
-    return post.map(v=>v/tot);
+    for (let i=0;i<nF;i++) post[i] /= tot;
+    return post;
   }
 
   function tauPost() {
-    const post = new Float64Array(nT);
+    const post = new Float32Array(nT);
     for (let ti=0;ti<nT;ti++) {
       let s = -Infinity;
       for (let fi=0;fi<nF;fi++)
@@ -581,181 +562,208 @@ const QUEST = (() => {
       post[ti] = Math.exp(s);
     }
     const tot = post.reduce((a,b)=>a+b,0);
-    return post.map(v=>v/tot);
+    for (let i=0;i<nT;i++) post[i] /= tot;
+    return post;
   }
 
-  function meanFreq()  { const p=freqPost(); return p.reduce((m,v,i)=>m+v*fGrid[i],0); }
-  function mapFreq()   { const p=freqPost(); let b=0,bv=0; p.forEach((v,i)=>{if(v>bv){bv=v;b=i;}}); return fGrid[b]; }
-  function meanTau()   { const p=tauPost();  return p.reduce((m,v,i)=>m+v*tauGrid[i],0); }
-
-  function meanParam(grid, margFn) {
+  function marginalMean(grid, margFn) {
     const p = margFn();
-    return p.reduce((m,v,i)=>m+v*grid[i],0);
-  }
-  function meanAmp()  {
-    const post=new Float64Array(nA);
-    for(let ai=0;ai<nA;ai++){
-      let s=-Infinity;
-      for(let fi=0;fi<nF;fi++) for(let bi=0;bi<nB;bi++) for(let ti=0;ti<nT;ti++)
-        s=lae(s,logPost[idx(fi,ai,bi,ti)]);
-      post[ai]=Math.exp(s);
-    }
-    const tot=post.reduce((a,b)=>a+b,0);
-    return post.map(v=>v/tot).reduce((m,v,i)=>m+v*ampGrid[i],0);
-  }
-  function meanBase() {
-    const post=new Float64Array(nB);
-    for(let bi=0;bi<nB;bi++){
-      let s=-Infinity;
-      for(let fi=0;fi<nF;fi++) for(let ai=0;ai<nA;ai++) for(let ti=0;ti<nT;ti++)
-        s=lae(s,logPost[idx(fi,ai,bi,ti)]);
-      post[bi]=Math.exp(s);
-    }
-    const tot=post.reduce((a,b)=>a+b,0);
-    return post.map(v=>v/tot).reduce((m,v,i)=>m+v*baseGrid[i],0);
+    return p.reduce((m,v,i) => m + v*grid[i], 0);
   }
 
-  // ── Posterior-averaged threshold curve ───────────────────────────
-  // Returns expected threshold contrast at a given SOA
+  function meanFreq()  { return marginalMean(fGrid,   freqPost); }
+  function mapFreq()   {
+    const p=freqPost(); let b=0,bv=0;
+    p.forEach((v,i)=>{if(v>bv){bv=v;b=i;}}); return fGrid[b];
+  }
+  function meanTau()   { return marginalMean(tauGrid,  tauPost); }
+
+  function meanAmp() {
+    const post = new Float32Array(nA);
+    for (let ai=0;ai<nA;ai++) {
+      let s=-Infinity;
+      for (let fi=0;fi<nF;fi++) for (let bi=0;bi<nB;bi++) for (let ti=0;ti<nT;ti++)
+        s = lae(s, logPost[idx(fi,ai,bi,ti)]);
+      post[ai] = Math.exp(s);
+    }
+    const tot=post.reduce((a,b)=>a+b,0);
+    return post.reduce((m,v,i)=>m+v/tot*ampGrid[i],0);
+  }
+
+  function meanBase() {
+    const post = new Float32Array(nB);
+    for (let bi=0;bi<nB;bi++) {
+      let s=-Infinity;
+      for (let fi=0;fi<nF;fi++) for (let ai=0;ai<nA;ai++) for (let ti=0;ti<nT;ti++)
+        s = lae(s, logPost[idx(fi,ai,bi,ti)]);
+      post[bi] = Math.exp(s);
+    }
+    const tot=post.reduce((a,b)=>a+b,0);
+    return post.reduce((m,v,i)=>m+v/tot*baseGrid[i],0);
+  }
+
+  // Posterior mean threshold curve
   function meanThreshold(soa_ms) {
-    let thr = 0;
-    for(let fi=0;fi<nF;fi++)
-      for(let ai=0;ai<nA;ai++)
-        for(let bi=0;bi<nB;bi++)
-          for(let ti=0;ti<nT;ti++)
+    let thr=0;
+    for (let fi=0;fi<nF;fi++)
+      for (let ai=0;ai<nA;ai++)
+        for (let bi=0;bi<nB;bi++)
+          for (let ti=0;ti<nT;ti++)
             thr += Math.exp(logPost[idx(fi,ai,bi,ti)]) * threshold(soa_ms,fi,ai,bi,ti);
     return thr;
   }
 
-  // ── Confidence: entropy over frequency marginal ───────────────────
+  // Confidence: 1 - normalised entropy over freq marginal
   function confidence() {
     const p=freqPost(), maxH=Math.log(nF); let H=0;
     p.forEach(v=>{if(v>1e-12)H-=v*Math.log(v);});
     return Math.max(0,Math.min(1,1-H/maxH));
   }
 
-  // ── Trough locations from posterior mean parameters ───────────────
-  // Returns array of {n, soa_ms, threshold_pct} for troughs 1,2,3
+  // Trough locations: nth trough at SOA=(4n-3)*1000/(4f)
   function troughs() {
-    const f   = meanFreq();
-    const tau = meanTau();
-    const A   = meanAmp();
-    const base= meanBase();
-    const results = [];
-    // nth trough at SOA = (4n-3)/(4f) seconds, n=1,2,3
-    for (let n=1; n<=3; n++) {
-      const soa_ms = (4*n-3) * 1000 / (4*f);
-      const env    = Math.exp(-soa_ms/tau);
-      const thr    = base + A * env; // sin=1 at trough
-      results.push({ n, soa_ms: Math.round(soa_ms), threshold_pct: Math.round(thr) });
-    }
-    return results;
-  }
-
-  // ── Posterior-predictive p(detect) at given SOA+contrast ─────────
-  function predictP(soa_ms, contrast_pct) {
-    let p=0;
-    for(let fi=0;fi<nF;fi++)
-      for(let ai=0;ai<nA;ai++)
-        for(let bi=0;bi<nB;bi++)
-          for(let ti=0;ti<nT;ti++)
-            p+=Math.exp(logPost[idx(fi,ai,bi,ti)])*pDet(soa_ms,contrast_pct,fi,ai,bi,ti);
-    return p;
-  }
-
-  // ── EIG: jointly select best (SOA, contrast) candidate ───────────
-  function entropy(dist) {
-    let h=0; dist.forEach(p=>{if(p>1e-12)h-=p*Math.log(p);}); return h;
-  }
-
-  function freqEntropy() { return entropy(freqPost()); }
-
-  // Marginal freq posterior after observing (soa, contrast, resp)
-  function freqPostGiven(soa_ms, contrast_pct, resp) {
-    const fp = new Float64Array(nF);
-    for(let fi=0;fi<nF;fi++){
-      let w=0;
-      for(let ai=0;ai<nA;ai++)
-        for(let bi=0;bi<nB;bi++)
-          for(let ti=0;ti<nT;ti++){
-            const prior = Math.exp(logPost[idx(fi,ai,bi,ti)]);
-            const pd    = pDet(soa_ms, contrast_pct, fi, ai, bi, ti);
-            w += prior * (resp ? pd : 1-pd);
-          }
-      fp[fi]=w;
-    }
-    const tot=fp.reduce((a,b)=>a+b,0);
-    if(tot>0) for(let i=0;i<nF;i++) fp[i]/=tot;
-    return fp;
-  }
-
-  // candidates: array of {soa_ms, contrast_pct}
-  function nextStim(candidates) {
-    const hC = freqEntropy();
-    let best = candidates[0], bestEIG = -Infinity;
-    candidates.forEach(c => {
-      const pY  = predictP(c.soa_ms, c.contrast_pct);
-      const pN  = 1 - pY;
-      const eig = hC - (pY*entropy(freqPostGiven(c.soa_ms,c.contrast_pct,1))
-                      + pN*entropy(freqPostGiven(c.soa_ms,c.contrast_pct,0)));
-      if(eig > bestEIG){ bestEIG=eig; best=c; }
+    const f=meanFreq(), tau=meanTau(), A=meanAmp(), base=meanBase();
+    return [1,2,3].map(n => {
+      const soa_ms = Math.round((4*n-3)*1000/(4*f));
+      const thr    = Math.max(base, base + A * Math.exp(-soa_ms/tau));
+      return { n, soa_ms, threshold_pct: Math.round(thr) };
     });
+  }
+
+  // ── EIG core (synchronous, called from async wrapper) ────────────
+  // Pre-computes posterior as a plain array once, reuses for all candidates.
+  function computeNextStim(candidates) {
+    // Cache exponentiated posterior
+    const post = new Float32Array(N);
+    for (let i=0;i<N;i++) post[i] = Math.exp(logPost[i]);
+
+    // Current freq entropy
+    const fp = new Float32Array(nF);
+    for (let fi=0;fi<nF;fi++) {
+      let s=0;
+      for (let ai=0;ai<nA;ai++)
+        for (let bi=0;bi<nB;bi++)
+          for (let ti=0;ti<nT;ti++)
+            s += post[idx(fi,ai,bi,ti)];
+      fp[fi] = s;
+    }
+    let tot=0; for (let i=0;i<nF;i++) tot+=fp[i];
+    let hC=0;
+    for (let i=0;i<nF;i++) { const p=fp[i]/tot; if(p>1e-12) hC-=p*Math.log(p); }
+
+    let best=candidates[0], bestEIG=-Infinity;
+
+    // Reusable buffers
+    const fpY = new Float32Array(nF);
+    const fpN = new Float32Array(nF);
+
+    for (let ci=0; ci<candidates.length; ci++) {
+      const {soa_ms, contrast_pct} = candidates[ci];
+      let pY=0;
+
+      // Compute p(Y) and accumulate per-freq posteriors
+      fpY.fill(0); fpN.fill(0);
+      for (let fi=0;fi<nF;fi++)
+        for (let ai=0;ai<nA;ai++)
+          for (let bi=0;bi<nB;bi++)
+            for (let ti=0;ti<nT;ti++) {
+              const w  = post[idx(fi,ai,bi,ti)];
+              const p  = pDet(soa_ms, contrast_pct, fi, ai, bi, ti);
+              fpY[fi] += w * p;
+              fpN[fi] += w * (1-p);
+              pY      += w * p;
+            }
+      const pN = 1 - pY;
+
+      // Entropy of freq posterior given Y
+      let hY=0, tY=0; for(let i=0;i<nF;i++) tY+=fpY[i];
+      for(let i=0;i<nF;i++){const p=fpY[i]/(tY||1);if(p>1e-12)hY-=p*Math.log(p);}
+
+      // Entropy of freq posterior given N
+      let hN=0, tN=0; for(let i=0;i<nF;i++) tN+=fpN[i];
+      for(let i=0;i<nF;i++){const p=fpN[i]/(tN||1);if(p>1e-12)hN-=p*Math.log(p);}
+
+      const eig = hC - (pY*hY + pN*hN);
+      if (eig > bestEIG) { bestEIG=eig; best=candidates[ci]; }
+    }
     return best;
   }
 
-  function reset() { logPost = new Float64Array(N).fill(-Math.log(N)); }
+  // ── Async EIG — runs via setTimeout so it never blocks ───────────
+  let _pendingStim = null;   // pre-computed result waiting for startTrial
+  let _computing   = false;  // guard against double calls
 
-  // Legacy shim — SOA-only next (used during warm-up)
-  function nextSOA(soaCands) {
-    // Pick contrast at current posterior mean threshold for that SOA
-    // so warm-up trials still land near the psychometric midpoint
-    const c = soaCands[Math.floor(Math.random()*soaCands.length)];
-    return c;
+  function scheduleNextStim(candidates, onDone) {
+    if (_computing) return;
+    _computing = true;
+    setTimeout(() => {
+      _pendingStim = computeNextStim(candidates);
+      _computing   = false;
+      if (onDone) onDone(_pendingStim);
+    }, 0);
+  }
+
+  function popNextStim(candidates) {
+    // Return pre-computed result if ready, otherwise compute synchronously
+    // (fallback — should rarely happen with 200ms+ ITI)
+    if (_pendingStim) {
+      const s = _pendingStim;
+      _pendingStim = null;
+      return s;
+    }
+    return computeNextStim(candidates);
+  }
+
+  function resetPending() { _pendingStim = null; _computing = false; }
+
+  function reset() {
+    logPost = new Float32Array(N).fill(-Math.log(N));
+    resetPending();
   }
 
   return {
-    update, predictP, nextStim, nextSOA, reset,
+    update, meanThreshold, troughs, confidence, reset,
     freqPost, tauPost, fGrid, tauGrid, nF, nT,
-    meanFreq, mapFreq, meanTau, meanAmp, meanBase, meanThreshold,
-    troughs, confidence, SIGMA_C
+    meanFreq, mapFreq, meanTau, meanAmp, meanBase,
+    scheduleNextStim, popNextStim, resetPending, SIGMA_C
   };
 })();
 
 // ════════════════════════════════════════════════════════════════════
-//  CANDIDATE GRID — (SOA × contrast) pairs for EIG selection
-//  Built once per session after calibration, updated if CFG changes.
+//  CANDIDATE GRID — (SOA × contrast) pairs for EIG
+//  Built once per session. 15 SOA × 8 contrast = 120 candidates.
 // ════════════════════════════════════════════════════════════════════
-let stimCandidates = [];  // [{soa_ms, contrast_pct}, ...]
+let stimCandidates = [];
 
 function buildStimCandidates(mspf) {
-  const minFrames = Math.ceil(50  / mspf);
-  const maxFrames = Math.ceil(CFG.soaMaxMs / mspf);
-  const soaCands  = [];
-  for(let f=minFrames; f<=maxFrames; f++) soaCands.push(Math.round(f*mspf));
-  const uniqueSOAs = [...new Set(soaCands)];
-
-  // Contrast levels: 5–95%, log-spaced to concentrate near low values
-  // where the interesting threshold region lives
-  const contrastLevels = [];
-  const nC = 12;
-  for(let i=0;i<nC;i++){
-    const pct = Math.round(5 * Math.pow(95/5, i/(nC-1)));
-    contrastLevels.push(Math.max(5, Math.min(95, pct)));
+  const minMs  = 50;
+  const maxMs  = CFG.soaMaxMs;
+  // 15 SOA values, quantised to frame boundaries
+  const nSOA   = 15;
+  const soaSet = new Set();
+  for (let i=0; i<nSOA; i++) {
+    const ms     = minMs + i*(maxMs-minMs)/(nSOA-1);
+    const frames = Math.round(ms/mspf);
+    soaSet.add(Math.round(frames*mspf));
   }
-  const uniqueContrasts = [...new Set(contrastLevels)];
+  const soaCands = [...soaSet];
+
+  // 8 contrast levels, log-spaced 5–90%
+  const nC = 8;
+  const contrastCands = Array.from({length:nC}, (_,i) =>
+    Math.round(5 * Math.pow(90/5, i/(nC-1)))
+  ).filter((v,i,a) => a.indexOf(v)===i); // unique
 
   const cands = [];
-  uniqueSOAs.forEach(soa => {
-    uniqueContrasts.forEach(c => cands.push({soa_ms: soa, contrast_pct: c}));
-  });
+  soaCands.forEach(soa =>
+    contrastCands.forEach(c => cands.push({soa_ms:soa, contrast_pct:c}))
+  );
   return cands;
 }
 
-// Current trial's assigned stimulus (set by startTrial / finishTrial)
 let currentContrast_pct = 40;
 
-function resetStaircases() { /* no separate staircase — QUEST handles everything */ }
-// Legacy alias
+function resetStaircases() { /* QUEST handles everything */ }
 function resetBinStaircases() { resetStaircases(); }
 
 // ════════════════════════════════════════════════════════════════════
@@ -973,7 +981,7 @@ function startSession() {
   // — never in a loop, to avoid blocking the main thread.
   const soaList = [...new Set(stimCandidates.map(c=>c.soa_ms))];
   for (let i=0; i<TOTAL_TRIALS; i++) {
-    if (i < 15) {
+    if (i < 16) {  // 16 random warm-up; first EIG assigned after trial 14 completes
       const soa = soaList[Math.floor(Math.random()*soaList.length)];
       trials.push({ soa_ms: soa, contrast_pct: 40,
                     detected: null, t1RT: null, t2RT: null,
@@ -985,12 +993,7 @@ function startSession() {
                     t2Contrast: null, t1Tapped: false });
     }
   }
-  // Pre-fill trial 15 now (first EIG trial) so startTrial() has it ready
-  if (TOTAL_TRIALS > 15) {
-    const stim = QUEST.nextStim(stimCandidates);
-    trials[15].soa_ms      = stim.soa_ms;
-    trials[15].contrast_pct= stim.contrast_pct;
-  }
+  // EIG trials assigned lazily in finishTrial() — nothing to pre-compute here
 
   document.getElementById('tap-overlay').style.display = 'block';
   showScreen('task-screen');
@@ -1033,9 +1036,9 @@ function startTrial() {
   phaseFrame= 0;
 
   // Get contrast assigned by QUEST for this trial
-  // If somehow null (shouldn't happen), fall back to 40%
+  // If somehow null, use popNextStim (returns pending async result or computes sync)
   if (trial.soa_ms === null || trial.contrast_pct === null) {
-    const stim = QUEST.nextStim(stimCandidates);
+    const stim = QUEST.popNextStim(stimCandidates);
     trial.soa_ms       = stim.soa_ms;
     trial.contrast_pct = stim.contrast_pct;
     currentSOA_ms      = trial.soa_ms;
@@ -1252,20 +1255,20 @@ function finishTrial() {
     if (detected) probeHits[soa]++; else probeMisses[soa]++;
     probeContrasts[soa].push(trial.t2Contrast);
 
-    // Assign the trial AFTER next via EIG — one call, runs after
-    // posterior has been updated with this trial's data.
-    const ni = currentTrial + 1;  // next trial (may already be assigned)
-    const ni2 = currentTrial + 2; // the one after — assign this now
-    if (ni2 < TOTAL_TRIALS && trials[ni2] && trials[ni2].soa_ms === null) {
-      const stim = QUEST.nextStim(stimCandidates);
-      trials[ni2].soa_ms       = stim.soa_ms;
-      trials[ni2].contrast_pct = stim.contrast_pct;
-    }
-    // Safety: if next trial somehow has no stimulus, assign it now
-    if (ni < TOTAL_TRIALS && trials[ni] && trials[ni].soa_ms === null) {
-      const stim = QUEST.nextStim(stimCandidates);
-      trials[ni].soa_ms       = stim.soa_ms;
-      trials[ni].contrast_pct = stim.contrast_pct;
+    // Schedule EIG async during ITI — never blocks main thread.
+    // Targets ni+1 (two ahead); falls back to ni if that's the null one.
+    const ni  = currentTrial + 1;
+    const ni2 = currentTrial + 2;
+    const tgt = (ni2 < TOTAL_TRIALS && trials[ni2] && trials[ni2].soa_ms === null) ? ni2
+              : (ni  < TOTAL_TRIALS && trials[ni]  && trials[ni].soa_ms  === null) ? ni
+              : -1;
+    if (tgt >= 0) {
+      QUEST.scheduleNextStim(stimCandidates, stim => {
+        if (trials[tgt]) {
+          trials[tgt].soa_ms       = stim.soa_ms;
+          trials[tgt].contrast_pct = stim.contrast_pct;
+        }
+      });
     }
   }
 
